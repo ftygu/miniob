@@ -1,4 +1,4 @@
-/* Copyright (c) 2021 OceanBase and/or its affiliates. All rights reserved.
+/* Copyright (c) 2021 Xie Meiyi(xiemeiyi@hust.edu.cn) and OceanBase and/or its affiliates. All rights reserved.
 miniob is licensed under Mulan PSL v2.
 You can use this software according to the terms and conditions of the Mulan PSL v2.
 You may obtain a copy of Mulan PSL v2 at:
@@ -12,18 +12,33 @@ See the Mulan PSL v2 for more details. */
 // Created by Longda on 2021/4/13.
 //
 
-#pragma once
+#ifndef __OBSERVER_SQL_PARSE_STAGE_H__
+#define __OBSERVER_SQL_PARSE_STAGE_H__
 
-#include "common/rc.h"
+#include "common/seda/stage.h"
+#include "rc.h"
 
-class SQLStageEvent;
-
-/**
- * @brief 解析SQL语句，解析后的结果可以参考parse_defs.h
- * @ingroup SQLStage
- */
-class ParseStage
-{
+class ParseStage : public common::Stage {
 public:
-  RC handle_request(SQLStageEvent *sql_event);
+  ~ParseStage();
+  static Stage *make_stage(const std::string &tag);
+
+protected:
+  // common function
+  ParseStage(const char *tag);
+  bool set_properties();
+
+  bool initialize();
+  void cleanup();
+  void handle_event(common::StageEvent *event);
+  void callback_event(common::StageEvent *event, common::CallbackContext *context);
+
+protected:
+  RC handle_request(common::StageEvent *event);
+
+private:
+  Stage *optimize_stage_ = nullptr;
+  Stage *resolve_stage_ = nullptr;
 };
+
+#endif  //__OBSERVER_SQL_PARSE_STAGE_H__

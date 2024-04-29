@@ -21,10 +21,8 @@ See the Mulan PSL v2 for more details. */
 #include "common/lang/string.h"
 #include "storage/record/record_manager.h"
 #include "storage/index/bplus_tree.h"
-#include "storage/table/table.h"
+#include "storage/common/table.h"
 #include "storage/common/condition_filter.h"
-#include "storage/clog/clog.h"
-#include "session/session.h"
 
 static DefaultHandler *default_handler = nullptr;
 
@@ -57,28 +55,11 @@ RC DefaultHandler::init(const char *base_dir)
   tmp += "/db";
   if (!common::check_directory(tmp)) {
     LOG_ERROR("Cannot access base dir: %s. msg=%d:%s", tmp.c_str(), errno, strerror(errno));
-    return RC::INTERNAL;
+    return RC::GENERIC_ERROR;
   }
 
   base_dir_ = base_dir;
   db_dir_ = tmp + "/";
-
-  const char *sys_db = "sys";
-
-  RC ret = create_db(sys_db);
-  if (ret != RC::SUCCESS && ret != RC::SCHEMA_DB_EXIST) {
-    LOG_ERROR("Failed to create system db");
-    return ret;
-  }
-
-  ret = open_db(sys_db);
-  if (ret != RC::SUCCESS) {
-    LOG_ERROR("Failed to open system db. rc=%s", strrc(ret));
-    return ret;
-  }
-
-  Session &default_session = Session::default_session();
-  default_session.set_current_db(sys_db);
 
   LOG_INFO("Default handler init with %s success", base_dir);
   return RC::SUCCESS;
@@ -110,14 +91,14 @@ RC DefaultHandler::create_db(const char *dbname)
 
   if (!common::check_directory(dbpath)) {
     LOG_ERROR("Create db fail: %s", dbpath.c_str());
-    return RC::INTERNAL;  // io error
+    return RC::GENERIC_ERROR;  // io error
   }
   return RC::SUCCESS;
 }
 
 RC DefaultHandler::drop_db(const char *dbname)
 {
-  return RC::INTERNAL;
+  return RC::GENERIC_ERROR;
 }
 
 RC DefaultHandler::open_db(const char *dbname)
@@ -140,26 +121,28 @@ RC DefaultHandler::open_db(const char *dbname)
   Db *db = new Db();
   RC ret = RC::SUCCESS;
   if ((ret = db->init(dbname, dbpath.c_str())) != RC::SUCCESS) {
-    LOG_ERROR("Failed to open db: %s. error=%s", dbname, strrc(ret));
-    delete db;
-  } else {
-    opened_dbs_[dbname] = db;
+    LOG_ERROR("Failed to open db: %s. error=%d", dbname, ret);
   }
-  return ret;
+  if ((ret = db->recover()) != RC::SUCCESS) {
+    LOG_ERROR("Failed to recover db: %s. error=%d", dbname, ret);
+  }
+
+  opened_dbs_[dbname] = db;
+  return RC::SUCCESS;
 }
 
 RC DefaultHandler::close_db(const char *dbname)
 {
-  return RC::UNIMPLENMENT;
+  return RC::GENERIC_ERROR;
 }
 
 RC DefaultHandler::execute(const char *sql)
 {
-  return RC::UNIMPLENMENT;
+  return RC::GENERIC_ERROR;
 }
 
 RC DefaultHandler::create_table(
-    const char *dbname, const char *relation_name, int attribute_count, const AttrInfoSqlNode *attributes)
+    const char *dbname, const char *relation_name, int attribute_count, const AttrInfo *attributes)
 {
   Db *db = find_db(dbname);
   if (db == nullptr) {
@@ -170,12 +153,62 @@ RC DefaultHandler::create_table(
 
 RC DefaultHandler::drop_table(const char *dbname, const char *relation_name)
 {
-  Db *db = find_db(dbname);
-  if (db == nullptr) 
-  {
-    return RC::SCHEMA_DB_NOT_OPENED;
+  return RC::GENERIC_ERROR;
+}
+
+RC DefaultHandler::create_index(  // TO DO MULTI INDEX
+    Trx *trx, const char *dbname, const char *relation_name, const char *index_name, const char *attribute_name)
+{
+  Table *table = find_table(dbname, relation_name);
+  if (nullptr == table) {
+    return RC::SCHEMA_TABLE_NOT_EXIST;
   }
-  return db->drop_table(relation_name);
+  AttrInfo attr_name[1];
+  attr_name[0].name = const_cast<char *>(attribute_name);
+  return table->create_index(trx, false, index_name, 1, attr_name);
+}
+
+RC DefaultHandler::drop_index(Trx *trx, const char *dbname, const char *relation_name, const char *index_name)
+{
+
+  return RC::GENERIC_ERROR;
+}
+
+RC DefaultHandler::insert_record(
+    Trx *trx, const char *dbname, const char *relation_name, int value_num, const Value *values)
+{
+  Table *table = find_table(dbname, relation_name);
+  if (nullptr == table) {
+    return RC::SCHEMA_TABLE_NOT_EXIST;
+  }
+
+  return table->insert_record(trx, value_num, values);
+}
+RC DefaultHandler::delete_record(Trx *trx, const char *dbname, const char *relation_name, int condition_num,
+    const Condition *conditions, int *deleted_count)
+{
+  Table *table = find_table(dbname, relation_name);
+  if (nullptr == table) {
+    return RC::SCHEMA_TABLE_NOT_EXIST;
+  }
+
+  CompositeConditionFilter condition_filter;
+  RC rc = condition_filter.init(*table, conditions, condition_num);
+  if (rc != RC::SUCCESS) {
+    return rc;
+  }
+  return table->delete_record(trx, &condition_filter, deleted_count);
+}
+
+RC DefaultHandler::update_record(Trx *trx, const char *dbname, const char *relation_name, const char *attribute_name,
+    const Value *value, int condition_num, const Condition *conditions, int *updated_count)
+{
+  Table *table = find_table(dbname, relation_name);
+  if (nullptr == table) {
+    return RC::SCHEMA_TABLE_NOT_EXIST;
+  }
+
+  return table->update_record(trx, attribute_name, value, condition_num, conditions, updated_count);
 }
 
 Db *DefaultHandler::find_db(const char *dbname) const

@@ -1,4 +1,4 @@
-/* Copyright (c) 2021 OceanBase and/or its affiliates. All rights reserved.
+/* Copyright (c) 2021 Xie Meiyi(xiemeiyi@hust.edu.cn) and OceanBase and/or its affiliates. All rights reserved.
 miniob is licensed under Mulan PSL v2.
 You can use this software according to the terms and conditions of the Mulan PSL v2.
 You may obtain a copy of Mulan PSL v2 at:
@@ -12,23 +12,29 @@ See the Mulan PSL v2 for more details. */
 // Created by Longda on 2021/4/13.
 //
 
-#pragma once
+#ifndef __OBSERVER_SQL_QUERY_CACHE_STAGE_H__
+#define __OBSERVER_SQL_QUERY_CACHE_STAGE_H__
 
-#include "common/rc.h"
+#include "common/seda/stage.h"
 
-class SQLStageEvent;
-
-/**
- * @brief 查询缓存处理
- * @ingroup SQLStage
- * @details 当前什么都没做
- */
-class QueryCacheStage
-{
+class QueryCacheStage : public common::Stage {
 public:
-  QueryCacheStage() = default;
-  virtual ~QueryCacheStage() = default;
+  ~QueryCacheStage();
+  static Stage *make_stage(const std::string &tag);
 
-public:
-  RC handle_request(SQLStageEvent *sql_event);
+protected:
+  // common function
+  QueryCacheStage(const char *tag);
+  bool set_properties();
+
+  bool initialize();
+  void cleanup();
+  void handle_event(common::StageEvent *event);
+  void callback_event(common::StageEvent *event, common::CallbackContext *context);
+
+protected:
+private:
+  Stage *optimize_stage_ = nullptr;
 };
+
+#endif  //__OBSERVER_SQL_QUERY_CACHE_STAGE_H__

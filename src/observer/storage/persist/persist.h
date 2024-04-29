@@ -1,4 +1,4 @@
-/* Copyright (c) 2021 OceanBase and/or its affiliates. All rights reserved.
+/* Copyright (c) 2021 Xie Meiyi(xiemeiyi@hust.edu.cn) and OceanBase and/or its affiliates. All rights reserved.
 miniob is licensed under Mulan PSL v2.
 You can use this software according to the terms and conditions of the Mulan PSL v2.
 You may obtain a copy of Mulan PSL v2 at:
@@ -11,21 +11,20 @@ See the Mulan PSL v2 for more details. */
 //
 // Created by qiling on 2021/4/13.
 //
-#pragma once
+#ifndef __OBSERVER_STORAGE_PERSIST_HANDLER_H_
+#define __OBSERVER_STORAGE_PERSIST_HANDLER_H_
 
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
-#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <string>
 
-#include "common/rc.h"
+#include "rc.h"
 
-class PersistHandler 
-{
+class PersistHandler {
 public:
   PersistHandler();
   ~PersistHandler();
@@ -64,3 +63,5 @@ private:
   std::string file_name_;
   int file_desc_ = -1;
 };
+
+#endif  //__OBSERVER_STORAGE_PERSIST_HANDLER_H_

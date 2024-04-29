@@ -1,4 +1,4 @@
-/* Copyright (c) 2021 OceanBase and/or its affiliates. All rights reserved.
+/* Copyright (c) 2021 Xie Meiyi(xiemeiyi@hust.edu.cn) and OceanBase and/or its affiliates. All rights reserved.
 miniob is licensed under Mulan PSL v2.
 You can use this software according to the terms and conditions of the Mulan PSL v2.
 You may obtain a copy of Mulan PSL v2 at:
@@ -12,7 +12,8 @@ See the Mulan PSL v2 for more details. */
 // Created by Longda on 2010
 //
 
-#pragma once
+#ifndef __COMMON_MM_DEBUG_NEW_H__
+#define __COMMON_MM_DEBUG_NEW_H__
 
 #include <new>
 #include <stdlib.h>
@@ -47,3 +48,4 @@ extern bool new_verbose_flag;    // default to false: no verbose information
 extern bool new_autocheck_flag;  // default to true: call check_leaks() on exit
 
 }  // namespace common
+#endif  // __COMMON_MM_DEBUG_NEW_H__

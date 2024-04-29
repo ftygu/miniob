@@ -1,4 +1,4 @@
-/* Copyright (c) 2021 OceanBase and/or its affiliates. All rights reserved.
+/* Copyright (c) 2021 Xie Meiyi(xiemeiyi@hust.edu.cn) and OceanBase and/or its affiliates. All rights reserved.
 miniob is licensed under Mulan PSL v2.
 You can use this software according to the terms and conditions of the Mulan PSL v2.
 You may obtain a copy of Mulan PSL v2 at:
@@ -12,15 +12,14 @@ See the Mulan PSL v2 for more details. */
 // Created by Longda on 2010
 //
 
-#pragma once
+#ifndef __COMMON_MM_MPOOL_H__
+#define __COMMON_MM_MPOOL_H__
 
 #include <queue>
 #include <list>
 #include <set>
 #include <string>
 #include <sstream>
-#include <functional>
-#include <memory>
 
 #include "common/lang/mutex.h"
 #include "common/log/log.h"
@@ -34,8 +33,7 @@ namespace common {
 typedef bool (*match)(void *item, void *input_arg);
 
 template <class T>
-class MemPool
-{
+class MemPool {
 public:
   MemPool(const char *tag) : name(tag)
   {
@@ -111,13 +109,10 @@ protected:
 };
 
 /**
- * MemoryPoolSimple is a simple Memory Pool manager
- * The objects is constructed when creating the pool and destructed when the pool is cleanup.
- * `alloc` calls T's `reinit` routine and `free` calls T's `reset`
+ * MemoryPoolSimple is a simple Memory Pool manager,
  */
 template <class T>
-class MemPoolSimple : public MemPool<T>
-{
+class MemPoolSimple : public MemPool<T> {
 public:
   MemPoolSimple(const char *tag) : MemPool<T>(tag)
   {}
@@ -193,7 +188,9 @@ int MemPoolSimple<T>::init(bool dynamic, int pool_num, int item_num_per_pool)
 
   if (pool_num <= 0 || item_num_per_pool <= 0) {
     LOG_ERROR("Invalid arguments,  pool_num:%d, item_num_per_pool:%d, this->name:%s.",
-              pool_num, item_num_per_pool, this->name.c_str());
+        pool_num,
+        item_num_per_pool,
+        this->name.c_str());
     return -1;
   }
 
@@ -209,7 +206,9 @@ int MemPoolSimple<T>::init(bool dynamic, int pool_num, int item_num_per_pool)
   this->dynamic = dynamic;
 
   LOG_INFO("Extend one pool, this->size:%d, item_num_per_pool:%d, this->name:%s.",
-           this->size, item_num_per_pool, this->name.c_str());
+      this->size,
+      item_num_per_pool,
+      this->name.c_str());
   return 0;
 }
 
@@ -250,7 +249,9 @@ int MemPoolSimple<T>::extend()
   if (pool == nullptr) {
     MUTEX_UNLOCK(&this->mutex);
     LOG_ERROR("Failed to extend memory pool, this->size:%d, item_num_per_pool:%d, this->name:%s.",
-              this->size, item_num_per_pool, this->name.c_str());
+        this->size,
+        item_num_per_pool,
+        this->name.c_str());
     return -1;
   }
 
@@ -262,7 +263,9 @@ int MemPoolSimple<T>::extend()
   MUTEX_UNLOCK(&this->mutex);
 
   LOG_INFO("Extend one pool, this->size:%d, item_num_per_pool:%d, this->name:%s.",
-           this->size, item_num_per_pool, this->name.c_str());
+      this->size,
+      item_num_per_pool,
+      this->name.c_str());
   return 0;
 }
 
@@ -287,15 +290,12 @@ T *MemPoolSimple<T>::alloc()
   used.insert(buffer);
 
   MUTEX_UNLOCK(&this->mutex);
-  buffer->reinit();
   return buffer;
 }
 
 template <class T>
 void MemPoolSimple<T>::free(T *buf)
 {
-  buf->reset();
-  
   MUTEX_LOCK(&this->mutex);
 
   size_t num = used.erase(buf);
@@ -326,11 +326,7 @@ std::string MemPoolSimple<T>::to_string()
   return ss.str();
 }
 
-class MemPoolItem
-{
-public:
-  using unique_ptr = std::unique_ptr<void, std::function<void(void * const)>>;
-
+class MemPoolItem {
 public:
   MemPoolItem(const char *tag) : name(tag)
   {
@@ -373,7 +369,6 @@ public:
    * @return
    */
   void *alloc();
-  unique_ptr alloc_unique_ptr();
 
   /**
    * Free one item, the resouce will return to memory Pool
@@ -451,3 +446,4 @@ protected:
 };
 
 }  // namespace common
+#endif /* __COMMON_MM_MPOOL_H__ */

@@ -1,4 +1,4 @@
-/* Copyright (c) 2021 OceanBase and/or its affiliates. All rights reserved.
+/* Copyright (c) 2021 Xie Meiyi(xiemeiyi@hust.edu.cn) and OceanBase and/or its affiliates. All rights reserved.
 miniob is licensed under Mulan PSL v2.
 You can use this software according to the terms and conditions of the Mulan PSL v2.
 You may obtain a copy of Mulan PSL v2 at:
@@ -15,23 +15,22 @@ See the Mulan PSL v2 for more details. */
 #pragma once
 
 #include <vector>
-#include <memory>
 
-#include "common/rc.h"
+#include "rc.h"
+#include "sql/parser/parse_defs.h"
+#include "sql/stmt/filter_stmt.h"
+#include "sql/stmt/groupby_stmt.h"
 #include "sql/stmt/stmt.h"
-#include "storage/field/field.h"
+#include "storage/common/field.h"
 
 class FieldMeta;
 class FilterStmt;
+class OrderByStmt;
 class Db;
 class Table;
+class Expression;
 
-/**
- * @brief 表示select语句
- * @ingroup Statement
- */
-class SelectStmt : public Stmt 
-{
+class SelectStmt : public Stmt {
 public:
   SelectStmt() = default;
   ~SelectStmt() override;
@@ -42,24 +41,52 @@ public:
   }
 
 public:
-  static RC create(Db *db, const SelectSqlNode &select_sql, Stmt *&stmt);
+  static RC create(Db *db, const Selects &select_sql, const std::vector<Table *> &parent_tables,
+      const std::unordered_map<std::string, Table *> &parent_table_map, Stmt *&stmt);
 
 public:
   const std::vector<Table *> &tables() const
   {
     return tables_;
   }
-  const std::vector<Field> &query_fields() const
+  const std::vector<Expression *> &projects() const
   {
-    return query_fields_;
+    return projects_;
   }
   FilterStmt *filter_stmt() const
   {
     return filter_stmt_;
   }
+  FilterStmt *inner_join_filter_stmt() const
+  {
+    return inner_join_filter_stmt_;
+  }
+  HavingStmt *having_stmt() const
+  {
+    return having_stmt_;
+  }
+  OrderByStmt *orderby_stmt() const
+  {
+    return orderby_stmt_;
+  }
+  OrderByStmt *orderby_stmt_for_groupby() const
+  {
+    return orderby_stmt_for_groupby_;
+  }
+  GroupByStmt *groupby_stmt() const
+  {
+    return groupby_stmt_;
+  }
 
 private:
-  std::vector<Field> query_fields_;
+  // own these expression
+  std::vector<Expression *> projects_;
+
   std::vector<Table *> tables_;
   FilterStmt *filter_stmt_ = nullptr;
+  FilterStmt *inner_join_filter_stmt_ = nullptr;
+  HavingStmt *having_stmt_ = nullptr;
+  OrderByStmt *orderby_stmt_ = nullptr;
+  OrderByStmt *orderby_stmt_for_groupby_ = nullptr;
+  GroupByStmt *groupby_stmt_ = nullptr;
 };

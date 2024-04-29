@@ -1,4 +1,4 @@
-/* Copyright (c) 2021 OceanBase and/or its affiliates. All rights reserved.
+/* Copyright (c) 2021 Xie Meiyi(xiemeiyi@hust.edu.cn) and OceanBase and/or its affiliates. All rights reserved.
 miniob is licensed under Mulan PSL v2.
 You can use this software according to the terms and conditions of the Mulan PSL v2.
 You may obtain a copy of Mulan PSL v2 at:
@@ -12,7 +12,8 @@ See the Mulan PSL v2 for more details. */
 // Created by wangyunlai on 2021/5/7.
 //
 
-#pragma once
+#ifndef __COMMON_LANG_BITMAP_H__
+#define __COMMON_LANG_BITMAP_H__
 
 namespace common {
 
@@ -23,6 +24,7 @@ public:
 
   void init(char *bitmap, int size);
   bool get_bit(int index);
+  bool get_bit(int index) const;
   void set_bit(int index);
   void clear_bit(int index);
 
@@ -38,3 +40,5 @@ private:
 };
 
 }  // namespace common
+
+#endif  // __COMMON_LANG_BITMAP_H__

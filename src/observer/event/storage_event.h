@@ -1,4 +1,4 @@
-/* Copyright (c) 2021 OceanBase and/or its affiliates. All rights reserved.
+/* Copyright (c) 2021 Xie Meiyi(xiemeiyi@hust.edu.cn) and OceanBase and/or its affiliates. All rights reserved.
 miniob is licensed under Mulan PSL v2.
 You can use this software according to the terms and conditions of the Mulan PSL v2.
 You may obtain a copy of Mulan PSL v2 at:
@@ -12,7 +12,8 @@ See the Mulan PSL v2 for more details. */
 // Created by Longda on 2021/4/14.
 //
 
-#pragma once
+#ifndef __OBSERVER_SQL_EVENT_STORAGEEVENT_H__
+#define __OBSERVER_SQL_EVENT_STORAGEEVENT_H__
 
 #include "common/seda/stage_event.h"
 
@@ -33,3 +34,5 @@ public:
 private:
   SQLStageEvent *sql_event_;
 };
+
+#endif  //__OBSERVER_SQL_EVENT_STORAGEEVENT_H__

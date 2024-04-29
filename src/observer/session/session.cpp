@@ -1,4 +1,4 @@
-/* Copyright (c) 2021 OceanBase and/or its affiliates. All rights reserved.
+/* Copyright (c) 2021 Xie Meiyi(xiemeiyi@hust.edu.cn) and OceanBase and/or its affiliates. All rights reserved.
 miniob is licensed under Mulan PSL v2.
 You can use this software according to the terms and conditions of the Mulan PSL v2.
 You may obtain a copy of Mulan PSL v2 at:
@@ -14,9 +14,8 @@ See the Mulan PSL v2 for more details. */
 
 #include "session/session.h"
 #include "storage/trx/trx.h"
-#include "storage/db/db.h"
+#include "storage/common/db.h"
 #include "storage/default/default_handler.h"
-#include "common/global_context.h"
 
 Session &Session::default_session()
 {
@@ -29,10 +28,8 @@ Session::Session(const Session &other) : db_(other.db_)
 
 Session::~Session()
 {
-  if (nullptr != trx_) {
-    GCTX.trx_kit_->destroy_trx(trx_);
-    trx_ = nullptr;
-  }
+  delete trx_;
+  trx_ = nullptr;
 }
 
 const char *Session::get_current_db_name() const
@@ -74,29 +71,7 @@ bool Session::is_trx_multi_operation_mode() const
 Trx *Session::current_trx()
 {
   if (trx_ == nullptr) {
-    trx_ = GCTX.trx_kit_->create_trx(db_->clog_manager());
+    trx_ = new Trx;
   }
   return trx_;
-}
-
-thread_local Session *thread_session = nullptr;
-
-void Session::set_current_session(Session *session)
-{
-  thread_session = session;
-}
-
-Session *Session::current_session()
-{
-  return thread_session;
-}
-
-void Session::set_current_request(SessionEvent *request)
-{
-  current_request_ = request;
-}
-
-SessionEvent *Session::current_request() const
-{
-  return current_request_;
 }

@@ -1,4 +1,4 @@
-/* Copyright (c) 2021 OceanBase and/or its affiliates. All rights reserved.
+/* Copyright (c) 2021 Xie Meiyi(xiemeiyi@hust.edu.cn) and OceanBase and/or its affiliates. All rights reserved.
 miniob is licensed under Mulan PSL v2.
 You can use this software according to the terms and conditions of the Mulan PSL v2.
 You may obtain a copy of Mulan PSL v2 at:
@@ -35,6 +35,9 @@ RC PersistHandler::create_file(const char *file_name)
   } else if (!file_name_.empty()) {
     LOG_ERROR("Failed to create %s, because a file is already bound.", file_name);
     rc = RC::FILE_BOUND;
+  } else if (access(file_name, F_OK) != -1) {
+    LOG_WARN("Failed to create %s, because file already exist.", file_name);
+    rc = RC::FILE_EXIST;
   } else {
     int fd;
     fd = open(file_name, O_RDWR | O_CREAT | O_EXCL, S_IREAD | S_IWRITE);
@@ -266,14 +269,12 @@ RC PersistHandler::read_at(uint64_t offset, int size, char *data, int64_t *out_s
           strerror(errno));
       return RC::FILE_SEEK;
     } else {
-      ssize_t read_size = read(file_desc_, data, size);
-      if (read_size == 0) {
-        LOG_TRACE("read file touch the end. file name=%s", file_name_.c_str());
-      } else if (read_size < 0) {
-        LOG_WARN("failed to read file. file name=%s, offset=%lld, size=%d, error=%s", file_name_.c_str(), offset, size,
-                 strerror(errno));
+      int64_t read_size = 0;
+      if ((read_size = read(file_desc_, data, size)) != size) {
+        LOG_WARN("Failed to read %lld of %d:%s due to %s.", offset, file_desc_, file_name_.c_str(), strerror(errno));
         rc = RC::FILE_READ;
-      } else if (out_size != nullptr) {
+      }
+      if (out_size != nullptr) {
         *out_size = read_size;
       }
     }

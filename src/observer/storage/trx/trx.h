@@ -1,4 +1,4 @@
-/* Copyright (c) 2021 OceanBase and/or its affiliates. All rights reserved.
+/* Copyright (c) 2021 Xie Meiyi(xiemeiyi@hust.edu.cn) and OceanBase and/or its affiliates. All rights reserved.
 miniob is licensed under Mulan PSL v2.
 You can use this software according to the terms and conditions of the Mulan PSL v2.
 You may obtain a copy of Mulan PSL v2 at:
@@ -12,43 +12,23 @@ See the Mulan PSL v2 for more details. */
 // Created by Wangyunlai on 2021/5/24.
 //
 
-#pragma once
+#ifndef __OBSERVER_STORAGE_TRX_TRX_H_
+#define __OBSERVER_STORAGE_TRX_TRX_H_
 
 #include <stddef.h>
+#include <unordered_map>
 #include <unordered_set>
 #include <mutex>
-#include <utility>
 
 #include "sql/parser/parse.h"
 #include "storage/record/record_manager.h"
-#include "storage/field/field_meta.h"
-#include "storage/table/table.h"
-#include "common/rc.h"
+#include "rc.h"
 
-/**
- * @defgroup Transaction
- * @brief 事务相关的内容
- */
+class Table;
 
-class Db;
-class CLogManager;
-class CLogRecord;
-class Trx;
-
-/**
- * @brief 描述一个操作，比如插入、删除行等
- * @ingroup Transaction
- * @details 通常包含一个操作的类型，以及操作的对象和具体的数据
- */
-class Operation 
-{
+class Operation {
 public:
-  /**
-   * @brief 操作的类型
-   * @ingroup Transaction
-   */
-  enum class Type : int 
-  {
+  enum class Type : int {
     INSERT,
     UPDATE,
     DELETE,
@@ -56,30 +36,28 @@ public:
   };
 
 public:
-  Operation(Type type, Table *table, const RID &rid) 
-      : type_(type), 
-        table_(table),
-        page_num_(rid.page_num), 
-        slot_num_(rid.slot_num)
+  Operation(Type type, const RID &rid) : type_(type), page_num_(rid.page_num), slot_num_(rid.slot_num)
   {}
 
-  Type    type() const { return type_; }
-  int32_t table_id() const { return table_->table_id(); }
-  Table * table() const { return table_; }
-  PageNum page_num() const { return page_num_; }
-  SlotNum slot_num() const { return slot_num_; }
+  Type type() const
+  {
+    return type_;
+  }
+  PageNum page_num() const
+  {
+    return page_num_;
+  }
+  SlotNum slot_num() const
+  {
+    return slot_num_;
+  }
 
 private:
-  ///< 操作的哪张表。这里直接使用表其实并不准确，因为表中的索引也可能有日志
   Type type_;
-  
-  Table * table_ = nullptr;
-  PageNum page_num_; // TODO use RID instead of page num and slot num
+  PageNum page_num_;
   SlotNum slot_num_;
 };
-
-class OperationHasher 
-{
+class OperationHasher {
 public:
   size_t operator()(const Operation &op) const
   {
@@ -87,73 +65,75 @@ public:
   }
 };
 
-class OperationEqualer 
-{
+class OperationEqualer {
 public:
   bool operator()(const Operation &op1, const Operation &op2) const
   {
-    return op1.table_id() == op2.table_id() &&
-        op1.page_num() == op2.page_num() && op1.slot_num() == op2.slot_num();
+    return op1.page_num() == op2.page_num() && op1.slot_num() == op2.slot_num();
   }
 };
 
 /**
- * @brief 事务管理器
- * @ingroup Transaction
+ * 这里是一个简单的事务实现，可以支持提交/回滚。但是没有对并发访问做控制
+ * 可以在这个基础上做备份恢复，当然也可以重写
  */
-class TrxKit
-{
+class Trx {
 public:
-  /**
-   * @brief 事务管理器的类型
-   * @ingroup Transaction
-   * @details 进程启动时根据事务管理器的类型来创建具体的对象
-   */
-  enum Type
-  {
-    VACUOUS,    ///< 空的事务管理器，不做任何事情
-    MVCC,       ///< 支持MVCC的事务管理器
-  };
+  static std::atomic<int32_t> trx_id;
+
+  static int32_t default_trx_id();
+  static int32_t next_trx_id();
+  static void set_trx_id(int32_t id);
+
+  static const char *trx_field_name();
+  static AttrType trx_field_type();
+  static int trx_field_len();
 
 public:
-  TrxKit() = default;
-  virtual ~TrxKit() = default;
-
-  virtual RC init() = 0;
-  virtual const std::vector<FieldMeta> *trx_fields() const = 0;
-  virtual Trx *create_trx(CLogManager *log_manager) = 0;
-  virtual Trx *create_trx(int32_t trx_id) = 0;
-  virtual Trx *find_trx(int32_t trx_id) = 0;
-  virtual void all_trxes(std::vector<Trx *> &trxes) = 0;
-
-  virtual void destroy_trx(Trx *trx) = 0;
+  Trx();
+  ~Trx();
 
 public:
-  static TrxKit *create(const char *name);
-  static RC init_global(const char *name);
-  static TrxKit *instance();
+  // delete all operations on table
+  // the func will be invoked when drop table
+  void delete_table(Table *table);
+
+public:
+  RC insert_record(Table *table, Record *record);
+  RC update_record(Table *table, Record *record);
+  RC delete_record(Table *table, Record *record);
+
+  RC commit();
+  RC rollback();
+
+  RC commit_insert(Table *table, Record &record);
+  RC rollback_delete(Table *table, Record &record);
+
+  bool is_visible(Table *table, const Record *record);
+
+  void init_trx_info(Table *table, Record &record);
+
+  void next_current_id();
+
+  int32_t get_current_id();
+
+private:
+  void set_record_trx_id(Table *table, Record &record, int32_t trx_id, bool deleted) const;
+  static void get_record_trx_id(Table *table, const Record &record, int32_t &trx_id, bool &deleted);
+
+private:
+  using OperationSet = std::unordered_set<Operation, OperationHasher, OperationEqualer>;
+
+  Operation *find_operation(Table *table, const RID &rid);
+  void insert_operation(Table *table, Operation::Type type, const RID &rid);
+  void delete_operation(Table *table, const RID &rid);
+
+private:
+  void start_if_not_started();
+
+private:
+  int32_t trx_id_ = 0;
+  std::unordered_map<Table *, OperationSet> operations_;
 };
 
-/**
- * @brief 事务接口
- * @ingroup Transaction
- */
-class Trx
-{
-public:
-  Trx() = default;
-  virtual ~Trx() = default;
-
-  virtual RC insert_record(Table *table, Record &record) = 0;
-  virtual RC delete_record(Table *table, Record &record) = 0;
-  virtual RC visit_record(Table *table, Record &record, bool readonly) = 0;
-  virtual RC update_record(Table* table, Record& record, Value& value, int offset) = 0;
-
-  virtual RC start_if_need() = 0;
-  virtual RC commit() = 0;
-  virtual RC rollback() = 0;
-
-  virtual RC redo(Db *db, const CLogRecord &log_record);
-
-  virtual int32_t id() const = 0;
-};
+#endif  // __OBSERVER_STORAGE_TRX_TRX_H_
