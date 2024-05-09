@@ -1,4 +1,4 @@
-/* Copyright (c) 2021 Xie Meiyi(xiemeiyi@hust.edu.cn) and OceanBase and/or its affiliates. All rights reserved.
+/* Copyright (c) 2021 OceanBase and/or its affiliates. All rights reserved.
 miniob is licensed under Mulan PSL v2.
 You can use this software according to the terms and conditions of the Mulan PSL v2.
 You may obtain a copy of Mulan PSL v2 at:
@@ -14,490 +14,276 @@ See the Mulan PSL v2 for more details. */
 
 #pragma once
 
-#include <cassert>
-#include <ostream>
-#include <string.h>
-#include <unordered_map>
-#include <vector>
-#include "common/log/log.h"
-#include "sql/parser/parse_defs.h"
-#include "storage/common/field.h"
-#include "sql/expr/tuple_cell.h"
-#include "storage/common/db.h"
+#include <memory>
+#include <string>
+
+#include "sql/parser/value.h"
+#include "storage/field/field.h"
 
 class Tuple;
-class SelectStmt;
-class ProjectOperator;
-class Stmt;
 
-enum class ExprType {
+/**
+ * @defgroup Expression
+ * @brief 表达式
+ */
+
+/**
+ * @brief 表达式类型
+ * @ingroup Expression
+ */
+enum class ExprType
+{
   NONE,
-  FIELD,
-  VALUE,
-  BINARY,
-  FUNC,
-  AGGRFUNCTION,
-  SUBQUERYTYPE,
-  SUBLISTTYPE,
+  STAR,         ///< 星号，表示所有字段
+  FIELD,        ///< 字段。在实际执行时，根据行数据内容提取对应字段的值
+  VALUE,        ///< 常量值
+  CAST,         ///< 需要做类型转换的表达式
+  COMPARISON,   ///< 需要做比较的表达式
+  CONJUNCTION,  ///< 多个表达式使用同一种关系(AND或OR)来联结
+  ARITHMETIC,   ///< 算术运算
 };
 
-class Expression {
+/**
+ * @brief 表达式的抽象描述
+ * @ingroup Expression
+ * @details 在SQL的元素中，任何需要得出值的元素都可以使用表达式来描述
+ * 比如获取某个字段的值、比较运算、类型转换
+ * 当然还有一些当前没有实现的表达式，比如算术运算。
+ *
+ * 通常表达式的值，是在真实的算子运算过程中，拿到具体的tuple后
+ * 才能计算出来真实的值。但是有些表达式可能就表示某一个固定的
+ * 值，比如ValueExpr。
+ */
+class Expression
+{
 public:
-  Expression() = default;
+  Expression()          = default;
   virtual ~Expression() = default;
 
-  virtual RC get_value(const Tuple &tuple, TupleCell &cell) const = 0;
+  /**
+   * @brief 根据具体的tuple，来计算当前表达式的值。tuple有可能是一个具体某个表的行数据
+   */
+  virtual RC get_value(const Tuple &tuple, Value &value) const = 0;
+
+  /**
+   * @brief 在没有实际运行的情况下，也就是无法获取tuple的情况下，尝试获取表达式的值
+   * @details 有些表达式的值是固定的，比如ValueExpr，这种情况下可以直接获取值
+   */
+  virtual RC try_get_value(Value &value) const { return RC::UNIMPLENMENT; }
+
+  /**
+   * @brief 表达式的类型
+   * 可以根据表达式类型来转换为具体的子类
+   */
   virtual ExprType type() const = 0;
-  virtual void to_string(std::ostream &os) const = 0;
 
-  static RC create_expression(const Expr *expr, const std::unordered_map<std::string, Table *> &table_map,
-      const std::vector<Table *> &tables, Expression *&res_expr, CompOp comp = NO_OP, Db *db = nullptr);
+  /**
+   * @brief 表达式值的类型
+   * @details 一个表达式运算出结果后，只有一个值
+   */
+  virtual AttrType value_type() const = 0;
 
-  void set_with_brace()
-  {
-    with_brace_ = 1;
-  }
-  bool with_brace() const
-  {
-    return with_brace_;
-  }
-
-  void set_alias(const std::string &alias)
-  {
-    alias_ = alias;
-  }
-
-  const std::string get_alias() const
-  {
-    return alias_;
-  }
+  /**
+   * @brief 表达式的名字，比如是字段名称，或者用户在执行SQL语句时输入的内容
+   */
+  virtual std::string name() const { return name_; }
+  virtual void        set_name(std::string name) { name_ = name; }
 
 private:
-  bool with_brace_ = 0;
-  std::string alias_ = "";
+  std::string name_;
 };
 
-class FieldExpr : public Expression {
+/**
+ * @brief 字段表达式
+ * @ingroup Expression
+ */
+class FieldExpr : public Expression
+{
 public:
   FieldExpr() = default;
-  FieldExpr(const Table *table, const FieldMeta *field) : field_(table, field)
-  {}
-  FieldExpr(const Table *table, const FieldMeta *field, bool with_brace) : FieldExpr(table, field)
-  {
-    if (with_brace) {
-      set_with_brace();
-    }
-  }
+  FieldExpr(const Table *table, const FieldMeta *field) : field_(table, field) {}
+  FieldExpr(const Field &field) : field_(field) {}
 
   virtual ~FieldExpr() = default;
 
-  ExprType type() const override
-  {
-    return ExprType::FIELD;
-  }
+  ExprType type() const override { return ExprType::FIELD; }
+  AttrType value_type() const override { return field_.attr_type(); }
 
-  AttrType attr_type() const
-  {
-    return field_.attr_type();
-  }
+  Field &field() { return field_; }
 
-  Field &field()
-  {
-    return field_;
-  }
+  const Field &field() const { return field_; }
 
-  const Field &field() const
-  {
-    return field_;
-  }
+  const char *table_name() const { return field_.table_name(); }
+  const char *field_name() const { return field_.field_name(); }
 
-  const Table *table() const
-  {
-    return field_.table();
-  }
-
-  const char *table_name() const
-  {
-    return field_.table_name();
-  }
-
-  const char *field_name() const
-  {
-    return field_.field_name();
-  }
-
-  RC get_value(const Tuple &tuple, TupleCell &cell) const override;
-
-  void to_string(std::ostream &os) const override;
-
-  bool in_expression(const Expression *expr) const;
-
-  static void get_fieldexprs_without_aggrfunc(const Expression *expr, std::vector<FieldExpr *> &field_exprs);
-
-  static RC create_expression(const Expr *expr, const std::unordered_map<std::string, Table *> &table_map,
-      const std::vector<Table *> &tables, Expression *&res_expr, CompOp comp = NO_OP, Db *db = nullptr);
+  RC get_value(const Tuple &tuple, Value &value) const override;
 
 private:
   Field field_;
 };
 
-class ValueExpr : public Expression {
+/**
+ * @brief 常量值表达式
+ * @ingroup Expression
+ */
+class ValueExpr : public Expression
+{
 public:
   ValueExpr() = default;
-  ValueExpr(const Value &value) : tuple_cell_(value.type, (char *)value.data)
-  {
-    if (value.type == CHARS) {
-      tuple_cell_.set_length(strlen((const char *)value.data));
-    }
-  }
-  ValueExpr(const Value &value, bool with_brace) : ValueExpr(value)
-  {
-    if (with_brace) {
-      set_with_brace();
-    }
-  }
+  explicit ValueExpr(const Value &value) : value_(value) {}
+
   virtual ~ValueExpr() = default;
 
-  RC get_value(const Tuple &tuple, TupleCell &cell) const override;
-  ExprType type() const override
+  RC get_value(const Tuple &tuple, Value &value) const override;
+  RC try_get_value(Value &value) const override
   {
-    return ExprType::VALUE;
+    value = value_;
+    return RC::SUCCESS;
   }
 
-  void get_tuple_cell(TupleCell &cell) const
-  {
-    cell = tuple_cell_;
-  }
+  ExprType type() const override { return ExprType::VALUE; }
+  AttrType value_type() const override { return value_.attr_type(); }
 
-  void to_string(std::ostream &os) const override;
-
-  static RC create_expression(const Expr *expr, const std::unordered_map<std::string, Table *> &table_map,
-      const std::vector<Table *> &tables, Expression *&res_expr, CompOp comp = NO_OP, Db *db = nullptr);
+  void         get_value(Value &value) const { value = value_; }
+  const Value &get_value() const { return value_; }
 
 private:
-  TupleCell tuple_cell_;
+  Value value_;
 };
 
-class FuncExpression : public Expression {
+/**
+ * @brief 类型转换表达式
+ * @ingroup Expression
+ */
+class CastExpr : public Expression
+{
 public:
-  FuncExpression() = default;
-  FuncExpression(FuncType func_type, int param_size, Expression *param1, Expression *param2, bool with_brace)
-      : func_type_(func_type), param_size_(param_size)
-  {
-    if (with_brace) {
-      set_with_brace();
-    }
-    if (param1 != NULL) {
-      params_expr_.emplace_back(param1);
-    }
-    if (param2 != NULL) {
-      params_expr_.emplace_back(param2);
-    }
-  }
-  virtual ~FuncExpression() = default;
+  CastExpr(std::unique_ptr<Expression> child, AttrType cast_type);
+  virtual ~CastExpr();
 
-  RC get_func_length_value(const Tuple &tuple, TupleCell &final_cell) const;
+  ExprType type() const override { return ExprType::CAST; }
+  RC       get_value(const Tuple &tuple, Value &value) const override;
 
-  RC get_func_round_value(const Tuple &tuple, TupleCell &final_cell) const;
+  RC try_get_value(Value &value) const override;
 
-  RC get_func_data_format_value(const Tuple &tuple, TupleCell &final_cell) const;
+  AttrType value_type() const override { return cast_type_; }
 
-  RC get_value(const Tuple &tuple, TupleCell &final_cell) const override
-  {
-    RC rc = RC::SUCCESS;
-    switch (func_type_) {
-      case FUNC_LENGTH: {
-        rc = get_func_length_value(tuple, final_cell);
-        break;
-      }
-      case FUNC_ROUND: {
-        rc = get_func_round_value(tuple, final_cell);
-        break;
-      }
-      case FUNC_DATE_FORMAT: {
-        rc = get_func_data_format_value(tuple, final_cell);
-        break;
-      }
-      default:
-        break;
-    }
-    return rc;
-  }
-
-  ExprType type() const override
-  {
-    return ExprType::FUNC;
-  }
-
-  void to_string(std::ostream &os) const override
-  {}
-
-  FuncType get_func_type()
-  {
-    return func_type_;
-  }
-
-  std::vector<Expression *> get_params()
-  {
-    return params_expr_;
-  }
-
-  int get_param_size()
-  {
-    return param_size_;
-  }
-  static RC create_expression(const Expr *expr, const std::unordered_map<std::string, Table *> &table_map,
-      const std::vector<Table *> &tables, Expression *&res_expr, CompOp comp = NO_OP, Db *db = nullptr);
+  std::unique_ptr<Expression> &child() { return child_; }
 
 private:
-  FuncType func_type_;
-  std::vector<Expression *> params_expr_;
-  int param_size_;
+  RC cast(const Value &value, Value &cast_value) const;
+
+private:
+  std::unique_ptr<Expression> child_;      ///< 从这个表达式转换
+  AttrType                    cast_type_;  ///< 想要转换成这个类型
 };
 
-class BinaryExpression : public Expression {
+/**
+ * @brief 比较表达式
+ * @ingroup Expression
+ */
+class ComparisonExpr : public Expression
+{
 public:
-  BinaryExpression() = default;
-  BinaryExpression(ExpOp op, Expression *left_expr, Expression *right_expr)
-      : op_(op), left_expr_(left_expr), right_expr_(right_expr)
-  {}
-  BinaryExpression(ExpOp op, Expression *left_expr, Expression *right_expr, bool with_brace)
-      : BinaryExpression(op, left_expr, right_expr)
-  {
-    if (with_brace) {
-      set_with_brace();
-    }
-  }
-  BinaryExpression(ExpOp op, Expression *left_expr, Expression *right_expr, bool with_brace, bool is_minus)
-      : BinaryExpression(op, left_expr, right_expr, with_brace)
-  {
-    is_minus_ = is_minus;
-  }
+  ComparisonExpr(CompOp comp, std::unique_ptr<Expression> left, std::unique_ptr<Expression> right);
+  virtual ~ComparisonExpr();
 
-  bool is_minus() const
-  {
-    return is_minus_;
-  }
+  ExprType type() const override { return ExprType::COMPARISON; }
+  RC       get_value(const Tuple &tuple, Value &value) const override;
+  AttrType value_type() const override { return BOOLEANS; }
+  CompOp   comp() const { return comp_; }
 
-  virtual ~BinaryExpression() = default;
+  std::unique_ptr<Expression> &left() { return left_; }
+  std::unique_ptr<Expression> &right() { return right_; }
 
-  const char get_op_char() const;
+  /**
+   * 尝试在没有tuple的情况下获取当前表达式的值
+   * 在优化的时候，可能会使用到
+   */
+  RC try_get_value(Value &value) const override;
 
-  Expression *get_left()
-  {
-    return left_expr_;
-  }
-  const Expression *get_left() const
-  {
-    return left_expr_;
-  }
-  Expression *get_right()
-  {
-    return right_expr_;
-  }
-  const Expression *get_right() const
-  {
-    return right_expr_;
-  }
-  void set_left(Expression *expr)
-  {
-    left_expr_ = expr;
-  }
-  void set_right(Expression *expr)
-  {
-    right_expr_ = expr;
-  }
-
-  RC get_value(const Tuple &tuple, TupleCell &final_cell) const override;
-
-  ExprType type() const override
-  {
-    return ExprType::BINARY;
-  }
-  void to_string(std::ostream &os) const override;
-
-  static RC create_expression(const Expr *expr, const std::unordered_map<std::string, Table *> &table_map,
-      const std::vector<Table *> &tables, Expression *&res_expr, CompOp comp = NO_OP, Db *db = nullptr);
+  /**
+   * compare the two tuple cells
+   * @param value the result of comparison
+   */
+  RC compare_value(const Value &left, const Value &right, bool &value) const;
 
 private:
-  ExpOp op_;
-  Expression *left_expr_ = nullptr;
-  Expression *right_expr_ = nullptr;
-  TupleCell expr_result_;
-  bool is_minus_ = false;  // only used for output
+  CompOp                      comp_;
+  std::unique_ptr<Expression> left_;
+  std::unique_ptr<Expression> right_;
 };
 
-class AggrFuncExpression : public Expression {
+/**
+ * @brief 联结表达式
+ * @ingroup Expression
+ * 多个表达式使用同一种关系(AND或OR)来联结
+ * 当前miniob仅有AND操作
+ */
+class ConjunctionExpr : public Expression
+{
 public:
-  AggrFuncExpression() = default;
-  AggrFuncExpression(AggrFuncType type, const FieldExpr *field) : type_(type), field_(field)
-  {}
-  AggrFuncExpression(AggrFuncType type, const FieldExpr *field, bool with_brace) : AggrFuncExpression(type, field)
+  enum class Type
   {
-    if (with_brace) {
-      set_with_brace();
-    }
-  }
+    AND,
+    OR,
+  };
 
-  virtual ~AggrFuncExpression() = default;
+public:
+  ConjunctionExpr(Type type, std::vector<std::unique_ptr<Expression>> &children);
+  virtual ~ConjunctionExpr() = default;
 
-  void set_param_value(const ValueExpr *value)
-  {
-    value_ = value;
-  }
-  bool is_param_value() const
-  {
-    return nullptr != value_;
-  }
-  const ValueExpr *get_param_value() const
-  {
-    assert(nullptr != value_);
-    return value_;
-  }
+  ExprType type() const override { return ExprType::CONJUNCTION; }
+  AttrType value_type() const override { return BOOLEANS; }
+  RC       get_value(const Tuple &tuple, Value &value) const override;
 
-  ExprType type() const override
-  {
-    return ExprType::AGGRFUNCTION;
-  }
+  Type conjunction_type() const { return conjunction_type_; }
 
-  const Field &field() const
-  {
-    return field_->field();
-  }
-
-  const FieldExpr &fieldexpr() const
-  {
-    return *field_;
-  }
-
-  const Table *table() const
-  {
-    return field_->table();
-  }
-
-  const char *table_name() const
-  {
-    return field_->table_name();
-  }
-
-  const char *field_name() const
-  {
-    return field_->field_name();
-  }
-
-  RC get_value(const Tuple &tuple, TupleCell &cell) const override;
-
-  std::string get_func_name() const;
-
-  AttrType get_return_type() const;
-
-  AggrFuncType get_aggr_func_type() const
-  {
-    return type_;
-  }
-
-  void to_string(std::ostream &os) const override;
-
-  static void get_aggrfuncexprs(const Expression *expr, std::vector<AggrFuncExpression *> &aggrfunc_exprs);
-
-  static RC create_expression(const Expr *expr, const std::unordered_map<std::string, Table *> &table_map,
-      const std::vector<Table *> &tables, Expression *&res_expr, CompOp comp = NO_OP, Db *db = nullptr);
+  std::vector<std::unique_ptr<Expression>> &children() { return children_; }
 
 private:
-  AggrFuncType type_;
-  const FieldExpr *field_ = nullptr;  // don't own this. keep const.
-  const ValueExpr *value_ = nullptr;  // for count(1) count(*) count("xxx") output
+  Type                                     conjunction_type_;
+  std::vector<std::unique_ptr<Expression>> children_;
 };
 
-class SubQueryExpression : public Expression {
+/**
+ * @brief 算术表达式
+ * @ingroup Expression
+ */
+class ArithmeticExpr : public Expression
+{
 public:
-  SubQueryExpression() = default;
-  virtual ~SubQueryExpression() = default;
-
-  ExprType type() const override
+  enum class Type
   {
-    return ExprType::SUBQUERYTYPE;
-  }
+    ADD,
+    SUB,
+    MUL,
+    DIV,
+    NEGATIVE,
+  };
 
-  void to_string(std::ostream &os) const override
-  {}
+public:
+  ArithmeticExpr(Type type, Expression *left, Expression *right);
+  ArithmeticExpr(Type type, std::unique_ptr<Expression> left, std::unique_ptr<Expression> right);
+  virtual ~ArithmeticExpr() = default;
 
-  RC get_value(const Tuple &tuple, TupleCell &final_cell) const override;
+  ExprType type() const override { return ExprType::ARITHMETIC; }
 
-  RC get_value(TupleCell &final_cell) const;
+  AttrType value_type() const override;
 
-  void set_sub_query_stmt(SelectStmt *sub_stmt)
-  {
-    sub_stmt_ = sub_stmt;
-  }
+  RC get_value(const Tuple &tuple, Value &value) const override;
+  RC try_get_value(Value &value) const override;
 
-  SelectStmt *get_sub_query_stmt() const
-  {
-    return sub_stmt_;
-  }
+  Type arithmetic_type() const { return arithmetic_type_; }
 
-  void set_sub_query_top_oper(ProjectOperator *oper)
-  {
-    sub_top_oper_ = oper;
-  }
-
-  ProjectOperator *get_sub_query_top_oper() const
-  {
-    return sub_top_oper_;
-  }
-
-  RC open_sub_query() const;
-  RC close_sub_query() const;
-
-  static RC create_expression(const Expr *expr, const std::unordered_map<std::string, Table *> &table_map,
-      const std::vector<Table *> &tables, Expression *&res_expr, CompOp comp = NO_OP, Db *db = nullptr);
+  std::unique_ptr<Expression> &left() { return left_; }
+  std::unique_ptr<Expression> &right() { return right_; }
 
 private:
-  SelectStmt *sub_stmt_ = nullptr;
-  ProjectOperator *sub_top_oper_ = nullptr;
-};
-
-class ListExpression : public Expression {
-public:
-  ListExpression() = default;
-
-  virtual ~ListExpression() = default;
-
-  RC get_value(const Tuple &tuple, TupleCell &cell) const override
-  {
-    return RC::UNIMPLENMENT;
-  }
-
-  ExprType type() const override
-  {
-    return ExprType::SUBLISTTYPE;
-  }
-
-  void set_tuple_cells(Value values[], int value_length)
-  {
-    TupleCell tuple_cell;
-    for (int i = 0; i < value_length; i++) {
-      tuple_cell.set_type(values[i].type);
-      tuple_cell.set_length(-1);
-      tuple_cell.set_data((char *)values[i].data);  // maybe null
-      if (values[i].type == CHARS) {
-        tuple_cell.set_length(strlen((const char *)values[i].data));
-      }
-      tuple_cells_.emplace_back(tuple_cell);
-    }
-  }
-
-  const std::vector<TupleCell> get_tuple_cells() const
-  {
-    return tuple_cells_;
-  }
-
-  void to_string(std::ostream &os) const override
-  {}
-
-  static RC create_expression(const Expr *expr, const std::unordered_map<std::string, Table *> &table_map,
-      const std::vector<Table *> &tables, Expression *&res_expr, CompOp comp = NO_OP, Db *db = nullptr);
+  RC calc_value(const Value &left_value, const Value &right_value, Value &value) const;
 
 private:
-  std::vector<TupleCell> tuple_cells_;
+  Type                        arithmetic_type_;
+  std::unique_ptr<Expression> left_;
+  std::unique_ptr<Expression> right_;
 };

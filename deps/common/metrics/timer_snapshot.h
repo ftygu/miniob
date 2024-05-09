@@ -1,4 +1,4 @@
-/* Copyright (c) 2021 Xie Meiyi(xiemeiyi@hust.edu.cn) and OceanBase and/or its affiliates. All rights reserved.
+/* Copyright (c) 2021 OceanBase and/or its affiliates. All rights reserved.
 miniob is licensed under Mulan PSL v2.
 You can use this software according to the terms and conditions of the Mulan PSL v2.
 You may obtain a copy of Mulan PSL v2 at:
@@ -12,19 +12,19 @@ See the Mulan PSL v2 for more details. */
 // Created by Longda on 2021/4/20.
 //
 
-#ifndef __COMMON_METRICS_TIMER_SNAPSHOT_H__
-#define __COMMON_METRICS_TIMER_SNAPSHOT_H__
+#pragma once
 
 #include "common/metrics/histogram_snapshot.h"
 
 namespace common {
-class TimerSnapshot : public HistogramSnapShot {
+class TimerSnapshot : public HistogramSnapShot
+{
 public:
   TimerSnapshot();
   virtual ~TimerSnapshot();
 
   double get_tps();
-  void set_tps(double tps);
+  void   set_tps(double tps);
 
   std::string to_string();
 
@@ -32,4 +32,3 @@ protected:
   double tps = 1.0;
 };
 }  // namespace common
-#endif  //__COMMON_METRICS_TIMER_SNAPSHOT_H__

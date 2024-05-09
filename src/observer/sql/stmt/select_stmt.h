@@ -1,4 +1,4 @@
-/* Copyright (c) 2021 Xie Meiyi(xiemeiyi@hust.edu.cn) and OceanBase and/or its affiliates. All rights reserved.
+/* Copyright (c) 2021 OceanBase and/or its affiliates. All rights reserved.
 miniob is licensed under Mulan PSL v2.
 You can use this software according to the terms and conditions of the Mulan PSL v2.
 You may obtain a copy of Mulan PSL v2 at:
@@ -14,79 +14,41 @@ See the Mulan PSL v2 for more details. */
 
 #pragma once
 
+#include <memory>
 #include <vector>
 
-#include "rc.h"
-#include "sql/parser/parse_defs.h"
-#include "sql/stmt/filter_stmt.h"
-#include "sql/stmt/groupby_stmt.h"
+#include "common/rc.h"
 #include "sql/stmt/stmt.h"
-#include "storage/common/field.h"
+#include "storage/field/field.h"
 
 class FieldMeta;
 class FilterStmt;
-class OrderByStmt;
 class Db;
 class Table;
-class Expression;
 
-class SelectStmt : public Stmt {
+/**
+ * @brief 表示select语句
+ * @ingroup Statement
+ */
+class SelectStmt : public Stmt
+{
 public:
   SelectStmt() = default;
   ~SelectStmt() override;
 
-  StmtType type() const override
-  {
-    return StmtType::SELECT;
-  }
+  StmtType type() const override { return StmtType::SELECT; }
 
 public:
-  static RC create(Db *db, const Selects &select_sql, const std::vector<Table *> &parent_tables,
-      const std::unordered_map<std::string, Table *> &parent_table_map, Stmt *&stmt);
+  static RC create(Db *db, const SelectSqlNode &select_sql, Stmt *&stmt);
 
 public:
-  const std::vector<Table *> &tables() const
-  {
-    return tables_;
-  }
-  const std::vector<Expression *> &projects() const
-  {
-    return projects_;
-  }
-  FilterStmt *filter_stmt() const
-  {
-    return filter_stmt_;
-  }
-  FilterStmt *inner_join_filter_stmt() const
-  {
-    return inner_join_filter_stmt_;
-  }
-  HavingStmt *having_stmt() const
-  {
-    return having_stmt_;
-  }
-  OrderByStmt *orderby_stmt() const
-  {
-    return orderby_stmt_;
-  }
-  OrderByStmt *orderby_stmt_for_groupby() const
-  {
-    return orderby_stmt_for_groupby_;
-  }
-  GroupByStmt *groupby_stmt() const
-  {
-    return groupby_stmt_;
-  }
+  const std::vector<Table *> &tables() const { return tables_; }
+  const std::vector<Field>   &query_fields() const { return query_fields_; }
+  FilterStmt                 *filter_stmt() const { return filter_stmt_; }
 
 private:
-  // own these expression
-  std::vector<Expression *> projects_;
-
+  std::vector<Field>   query_fields_;
   std::vector<Table *> tables_;
-  FilterStmt *filter_stmt_ = nullptr;
-  FilterStmt *inner_join_filter_stmt_ = nullptr;
-  HavingStmt *having_stmt_ = nullptr;
-  OrderByStmt *orderby_stmt_ = nullptr;
-  OrderByStmt *orderby_stmt_for_groupby_ = nullptr;
-  GroupByStmt *groupby_stmt_ = nullptr;
+  FilterStmt          *filter_stmt_ = nullptr;
+  std::string          func_type;
 };

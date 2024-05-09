@@ -1,4 +1,4 @@
-/* Copyright (c) 2021 Xie Meiyi(xiemeiyi@hust.edu.cn) and OceanBase and/or its affiliates. All rights reserved.
+/* Copyright (c) 2021 OceanBase and/or its affiliates. All rights reserved.
 miniob is licensed under Mulan PSL v2.
 You can use this software according to the terms and conditions of the Mulan PSL v2.
 You may obtain a copy of Mulan PSL v2 at:
@@ -12,25 +12,31 @@ See the Mulan PSL v2 for more details. */
 // Created by Longda on 2010
 //
 
-#ifndef __COMMON_LANG_MUTEX_H__
-#define __COMMON_LANG_MUTEX_H__
+#pragma once
 
+#include <condition_variable>
 #include <errno.h>
 #include <map>
+#include <mutex>
 #include <pthread.h>
-#include <set>
+#include <shared_mutex>
 #include <sstream>
 #include <string.h>
 #include <string>
 #include <sys/types.h>
+#include <thread>
+#include <unordered_map>
 
 #include "common/log/log.h"
+
+using namespace std;
 
 namespace common {
 
 #define MUTEX_LOG LOG_DEBUG
 
-class LockTrace {
+class LockTrace
+{
 public:
   static void check(pthread_mutex_t *mutex, const long long threadId, const char *file, const int line);
   static void lock(pthread_mutex_t *mutex, const long long threadId, const char *file, const int line);
@@ -39,12 +45,12 @@ public:
 
   static void toString(std::string &result);
 
-  class LockID {
+  class LockID
+  {
   public:
     LockID(const long long threadId, const char *file, const int line) : mFile(file), mThreadId(threadId), mLine(line)
     {}
-    LockID() : mFile(), mThreadId(0), mLine(0)
-    {}
+    LockID() : mFile(), mThreadId(0), mLine(0) {}
 
     std::string toString()
     {
@@ -56,9 +62,9 @@ public:
     }
 
   public:
-    std::string mFile;
+    std::string     mFile;
     const long long mThreadId;
-    int mLine;
+    int             mLine;
   };
 
   static void foundDeadLock(LockID &current, LockID &other, pthread_mutex_t *otherWaitMutex);
@@ -71,22 +77,19 @@ public:
 
   static void insertLock(pthread_mutex_t *mutex, const long long threadId, const char *file, const int line);
 
-  static void setMaxBlockThreads(int blockNum)
-  {
-    mMaxBlockTids = blockNum;
-  }
+  static void setMaxBlockThreads(int blockNum) { mMaxBlockTids = blockNum; }
 
 public:
   static std::set<pthread_mutex_t *> mEnableRecurisives;
 
 protected:
-  static std::map<pthread_mutex_t *, LockID> mLocks;
-  static std::map<pthread_mutex_t *, int> mWaitTimes;
-  static std::map<long long, pthread_mutex_t *> mWaitLocks;
+  static std::map<pthread_mutex_t *, LockID>              mLocks;
+  static std::map<pthread_mutex_t *, int>                 mWaitTimes;
+  static std::map<long long, pthread_mutex_t *>           mWaitLocks;
   static std::map<long long, std::set<pthread_mutex_t *>> mOwnLocks;
 
   static pthread_rwlock_t mMapMutex;
-  static int mMaxBlockTids;
+  static int              mMaxBlockTids;
 };
 
 // Open this macro in Makefile
@@ -239,5 +242,86 @@ protected:
 
 #endif  // DEBUG_LOCK
 
+class DebugMutex final
+{
+public:
+  DebugMutex()  = default;
+  ~DebugMutex() = default;
+
+  void lock();
+  void unlock();
+
+private:
+#ifdef DEBUG
+  std::mutex lock_;
+#endif
+};
+
+class Mutex final
+{
+public:
+  Mutex()  = default;
+  ~Mutex() = default;
+
+  void lock();
+  bool try_lock();
+  void unlock();
+
+private:
+#ifdef CONCURRENCY
+  std::mutex lock_;
+#endif
+};
+
+class SharedMutex final
+{
+public:
+  SharedMutex()  = default;
+  ~SharedMutex() = default;
+
+  void lock();  // lock exclusive
+  bool try_lock();
+  void unlock();  // unlock exclusive
+
+  void lock_shared();
+  bool try_lock_shared();
+  void unlock_shared();
+
+private:
+#ifdef CONCURRENCY
+  std::shared_mutex lock_;
+#endif
+};
+
+/**
+ * 支持写锁递归加锁的读写锁
+ * 读锁本身就可以递归加锁。但是某个线程加了读锁后，也不能再加写锁。
+ * 但是一个线程可以加多次写锁
+ * 与其它类型的锁一样，在CONCURRENCY编译模式下才会真正的生效
+ */
+class RecursiveSharedMutex
+{
+public:
+  RecursiveSharedMutex()  = default;
+  ~RecursiveSharedMutex() = default;
+
+  void lock_shared();
+  bool try_lock_shared();
+  void unlock_shared();
+
+  void lock();
+  void unlock();
+
+private:
+#ifdef CONCURRENCY
+  std::mutex              mutex_;
+  std::condition_variable shared_lock_cv_;
+  std::condition_variable exclusive_lock_cv_;
+  int                     shared_lock_count_    = 0;
+  int                     exclusive_lock_count_ = 0;
+  std::thread::id         recursive_owner_;
+  int                     recursive_count_ = 0;  // 表示当前线程加写锁加了多少次
+#endif                                           // CONCURRENCY
+};
+
 }  // namespace common
-#endif  // __COMMON_LANG_MUTEX_H__

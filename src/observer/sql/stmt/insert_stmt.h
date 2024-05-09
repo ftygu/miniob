@@ -1,4 +1,4 @@
-/* Copyright (c) 2021 Xie Meiyi(xiemeiyi@hust.edu.cn) and OceanBase and/or its affiliates. All rights reserved.
+/* Copyright (c) 2021 OceanBase and/or its affiliates. All rights reserved.
 miniob is licensed under Mulan PSL v2.
 You can use this software according to the terms and conditions of the Mulan PSL v2.
 You may obtain a copy of Mulan PSL v2 at:
@@ -14,47 +14,34 @@ See the Mulan PSL v2 for more details. */
 
 #pragma once
 
-#include <vector>
-#include "rc.h"
+#include "common/rc.h"
 #include "sql/stmt/stmt.h"
 
 class Table;
 class Db;
 
-class InsertStmt : public Stmt {
+/**
+ * @brief 插入语句
+ * @ingroup Statement
+ */
+class InsertStmt : public Stmt
+{
 public:
   InsertStmt() = default;
-  InsertStmt(Table *table, std::vector<const Value *> &rows, int row_amount, int value_amount);
+  InsertStmt(Table *table, const Value *values, int value_amount);
 
-  StmtType type() const override
-  {
-    return StmtType::INSERT;
-  }
+  StmtType type() const override { return StmtType::INSERT; }
 
 public:
-  static RC create(Db *db, const Inserts &insert_sql, Stmt *&stmt);
+  static RC create(Db *db, const InsertSqlNode &insert_sql, Stmt *&stmt);
 
 public:
-  Table *table() const
-  {
-    return table_;
-  }
-  std::vector<const Value *> &rows()
-  {
-    return rows_;
-  }
-  int value_amount() const
-  {
-    return value_amount_;
-  }
-  int row_amount() const
-  {
-    return row_amount_;
-  }
+  Table       *table() const { return table_; }
+  const Value *values() const { return values_; }
+  int          value_amount() const { return value_amount_; }
 
 private:
-  Table *table_ = nullptr;
-  int row_amount_ = 0;
-  int value_amount_ = 0;
-  std::vector<const Value *> rows_;
+  Table       *table_        = nullptr;
+  const Value *values_       = nullptr;
+  int          value_amount_ = 0;
 };

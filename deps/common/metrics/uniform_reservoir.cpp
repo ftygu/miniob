@@ -1,4 +1,4 @@
-/* Copyright (c) 2021 Xie Meiyi(xiemeiyi@hust.edu.cn) and OceanBase and/or its affiliates. All rights reserved.
+/* Copyright (c) 2021 OceanBase and/or its affiliates. All rights reserved.
 miniob is licensed under Mulan PSL v2.
 You can use this software according to the terms and conditions of the Mulan PSL v2.
 You may obtain a copy of Mulan PSL v2 at:
@@ -86,7 +86,7 @@ void UniformReservoir::update(double value)
     data[count] = (value);
   } else {
     size_t rcount = next(data.size());
-    data[rcount] = (value);
+    data[rcount]  = (value);
   }
 
   MUTEX_UNLOCK(&mutex);

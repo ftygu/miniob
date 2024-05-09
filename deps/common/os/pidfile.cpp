@@ -1,4 +1,4 @@
-/* Copyright (c) 2021 Xie Meiyi(xiemeiyi@hust.edu.cn) and OceanBase and/or its affiliates. All rights reserved.
+/* Copyright (c) 2021 OceanBase and/or its affiliates. All rights reserved.
 miniob is licensed under Mulan PSL v2.
 You can use this software according to the terms and conditions of the Mulan PSL v2.
 You may obtain a copy of Mulan PSL v2 at:
@@ -48,7 +48,7 @@ int writePidFile(const char *progName)
 {
   assert(progName);
   std::ofstream ostr;
-  int rv = 1;
+  int           rv = 1;
 
   setPidPath(progName);
   std::string path = getPidPath();

@@ -1,11 +1,9 @@
-**description**: description
+### What problem were solved in this pull request?
 
-**score**: 10
+Issue Number: close #xxx
 
-**pass**:
-- **current_work**
-- basic
-- ...
+Problem:
 
-**result**:
-<!-- screenshot is welcome -->
+### What is changed and how it works?
+
+### Other information

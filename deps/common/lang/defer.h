@@ -1,4 +1,4 @@
-/* Copyright (c) 2021 Xie Meiyi(xiemeiyi@hust.edu.cn) and OceanBase and/or its affiliates. All rights reserved.
+/* Copyright (c) 2021 OceanBase and/or its affiliates. All rights reserved.
 miniob is licensed under Mulan PSL v2.
 You can use this software according to the terms and conditions of the Mulan PSL v2.
 You may obtain a copy of Mulan PSL v2 at:
@@ -20,9 +20,8 @@ namespace common {
 
 class DeferHelper
 {
-public: 
-  DeferHelper(const std::function<void()> defer) : defer_(std::move(defer))
-  {}
+public:
+  DeferHelper(const std::function<void()> defer) : defer_(std::move(defer)) {}
 
   ~DeferHelper()
   {
@@ -35,10 +34,10 @@ private:
   const std::function<void()> defer_;
 };
 
-} // namespace common
+}  // namespace common
 
 #define AA(B, C) B##C
 
-#define BB(B, C) AA(B,C)
+#define BB(B, C) AA(B, C)
 
 #define DEFER(callback) common::DeferHelper BB(defer_helper_, __LINE__)(callback)

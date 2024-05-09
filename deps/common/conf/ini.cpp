@@ -1,4 +1,4 @@
-/* Copyright (c) 2021 Xie Meiyi(xiemeiyi@hust.edu.cn) and OceanBase and/or its affiliates. All rights reserved.
+/* Copyright (c) 2021 OceanBase and/or its affiliates. All rights reserved.
 miniob is licensed under Mulan PSL v2.
 You can use this software according to the terms and conditions of the Mulan PSL v2.
 You may obtain a copy of Mulan PSL v2 at:
@@ -24,18 +24,16 @@ See the Mulan PSL v2 for more details. */
 
 namespace common {
 
-const std::string Ini::DEFAULT_SECTION = std::string("");
+const std::string                        Ini::DEFAULT_SECTION = std::string("");
 const std::map<std::string, std::string> Ini::empty_map_;
 
-Ini::Ini()
-{}
+Ini::Ini() {}
 
-Ini::~Ini()
-{}
+Ini::~Ini() {}
 
 void Ini::insert_session(const std::string &session_name)
 {
-  std::map<std::string, std::string> session_map;
+  std::map<std::string, std::string>                         session_map;
   std::pair<std::string, std::map<std::string, std::string>> entry =
       std::pair<std::string, std::map<std::string, std::string>>(session_name, session_map);
 
@@ -103,7 +101,7 @@ int Ini::insert_entry(std::map<std::string, std::string> *session_map, const std
     return -1;
   }
 
-  std::string key = line.substr(0, equal_pos);
+  std::string key   = line.substr(0, equal_pos);
   std::string value = line.substr(equal_pos + 1);
 
   strip(key);
@@ -150,7 +148,7 @@ int Ini::load(const std::string &file_name)
       if (read_buf[0] == CFG_SESSION_START_TAG && read_buf[strlen(read_buf) - 1] == CFG_SESSION_END_TAG) {
 
         read_buf[strlen(read_buf) - 1] = '\0';
-        std::string session_name = std::string(read_buf + 1);
+        std::string session_name       = std::string(read_buf + 1);
 
         current_session = switch_session(session_name);
 

@@ -1,4 +1,4 @@
-/* Copyright (c) 2021 Xie Meiyi(xiemeiyi@hust.edu.cn) and OceanBase and/or its affiliates. All rights reserved.
+/* Copyright (c) 2021 OceanBase and/or its affiliates. All rights reserved.
 miniob is licensed under Mulan PSL v2.
 You can use this software according to the terms and conditions of the Mulan PSL v2.
 You may obtain a copy of Mulan PSL v2 at:
@@ -36,24 +36,18 @@ int find_first_setted(char byte, int start)
   return -1;
 }
 
-Bitmap::Bitmap() : bitmap_(nullptr), size_(0)
-{}
-Bitmap::Bitmap(char *bitmap, int size) : bitmap_(bitmap), size_(size)
-{}
+int bytes(int size) { return size % 8 == 0 ? size / 8 : size / 8 + 1; }
+
+Bitmap::Bitmap() : bitmap_(nullptr), size_(0) {}
+Bitmap::Bitmap(char *bitmap, int size) : bitmap_(bitmap), size_(size) {}
 
 void Bitmap::init(char *bitmap, int size)
 {
   bitmap_ = bitmap;
-  size_ = size;
+  size_   = size;
 }
 
 bool Bitmap::get_bit(int index)
-{
-  char bits = bitmap_[index / 8];
-  return (bits & (1 << (index % 8))) != 0;
-}
-
-bool Bitmap::get_bit(int index) const
 {
   char bits = bitmap_[index / 8];
   return (bits & (1 << (index % 8))) != 0;
@@ -73,9 +67,9 @@ void Bitmap::clear_bit(int index)
 
 int Bitmap::next_unsetted_bit(int start)
 {
-  int ret = -1;
+  int ret           = -1;
   int start_in_byte = start % 8;
-  for (int iter = start / 8, end = (size_ % 8 == 0 ? size_ / 8 : size_ / 8 + 1); iter <= end; iter++) {
+  for (int iter = start / 8, end = bytes(size_); iter < end; iter++) {
     char byte = bitmap_[iter];
     if (byte != -1) {
       int index_in_byte = find_first_zero(byte, start_in_byte);
@@ -96,9 +90,9 @@ int Bitmap::next_unsetted_bit(int start)
 
 int Bitmap::next_setted_bit(int start)
 {
-  int ret = -1;
+  int ret           = -1;
   int start_in_byte = start % 8;
-  for (int iter = start / 8, end = (size_ % 8 == 0 ? size_ / 8 : size_ / 8 + 1); iter <= end; iter++) {
+  for (int iter = start / 8, end = bytes(size_); iter < end; iter++) {
     char byte = bitmap_[iter];
     if (byte != 0x00) {
       int index_in_byte = find_first_setted(byte, start_in_byte);

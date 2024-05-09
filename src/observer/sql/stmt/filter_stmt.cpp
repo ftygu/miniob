@@ -1,4 +1,4 @@
-/* Copyright (c) 2021 Xie Meiyi(xiemeiyi@hust.edu.cn) and OceanBase and/or its affiliates. All rights reserved.
+/* Copyright (c) 2021 OceanBase and/or its affiliates. All rights reserved.
 miniob is licensed under Mulan PSL v2.
 You can use this software according to the terms and conditions of the Mulan PSL v2.
 You may obtain a copy of Mulan PSL v2 at:
@@ -12,14 +12,12 @@ See the Mulan PSL v2 for more details. */
 // Created by Wangyunlai on 2022/5/22.
 //
 
-#include "rc.h"
-#include "common/log/log.h"
-#include "common/lang/string.h"
-#include "sql/expr/expression.h"
-#include "sql/parser/parse_defs.h"
 #include "sql/stmt/filter_stmt.h"
-#include "storage/common/db.h"
-#include "storage/common/table.h"
+#include "common/lang/string.h"
+#include "common/log/log.h"
+#include "common/rc.h"
+#include "storage/db/db.h"
+#include "storage/table/table.h"
 
 FilterStmt::~FilterStmt()
 {
@@ -30,14 +28,15 @@ FilterStmt::~FilterStmt()
 }
 
 RC FilterStmt::create(Db *db, Table *default_table, std::unordered_map<std::string, Table *> *tables,
-    const Condition *conditions, int condition_num, FilterStmt *&stmt)
+    const ConditionSqlNode *conditions, int condition_num, FilterStmt *&stmt)
 {
   RC rc = RC::SUCCESS;
-  stmt = nullptr;
+  stmt  = nullptr;
 
   FilterStmt *tmp_stmt = new FilterStmt();
   for (int i = 0; i < condition_num; i++) {
     FilterUnit *filter_unit = nullptr;
+
     rc = create_filter_unit(db, default_table, tables, conditions[i], filter_unit);
     if (rc != RC::SUCCESS) {
       delete tmp_stmt;
@@ -52,26 +51,26 @@ RC FilterStmt::create(Db *db, Table *default_table, std::unordered_map<std::stri
 }
 
 RC get_table_and_field(Db *db, Table *default_table, std::unordered_map<std::string, Table *> *tables,
-    const RelAttr &attr, Table *&table, const FieldMeta *&field)
+    const RelAttrSqlNode &attr, Table *&table, const FieldMeta *&field)
 {
-  if (common::is_blank(attr.relation_name)) {
+  if (common::is_blank(attr.relation_name.c_str())) {
     table = default_table;
   } else if (nullptr != tables) {
-    auto iter = tables->find(std::string(attr.relation_name));
+    auto iter = tables->find(attr.relation_name);
     if (iter != tables->end()) {
       table = iter->second;
     }
   } else {
-    table = db->find_table(attr.relation_name);
+    table = db->find_table(attr.relation_name.c_str());
   }
   if (nullptr == table) {
-    LOG_WARN("No such table: attr.relation_name: %s", attr.relation_name);
+    LOG_WARN("No such table: attr.relation_name: %s", attr.relation_name.c_str());
     return RC::SCHEMA_TABLE_NOT_EXIST;
   }
 
-  field = table->table_meta().field(attr.attribute_name);
+  field = table->table_meta().field(attr.attribute_name.c_str());
   if (nullptr == field) {
-    LOG_WARN("no such field in table: table %s, field %s", table->name(), attr.attribute_name);
+    LOG_WARN("no such field in table: table %s, field %s", table->name(), attr.attribute_name.c_str());
     table = nullptr;
     return RC::SCHEMA_FIELD_NOT_EXIST;
   }
@@ -80,7 +79,7 @@ RC get_table_and_field(Db *db, Table *default_table, std::unordered_map<std::str
 }
 
 RC FilterStmt::create_filter_unit(Db *db, Table *default_table, std::unordered_map<std::string, Table *> *tables,
-    const Condition &condition, FilterUnit *&filter_unit)
+    const ConditionSqlNode &condition, FilterUnit *&filter_unit)
 {
   RC rc = RC::SUCCESS;
 
@@ -90,46 +89,43 @@ RC FilterStmt::create_filter_unit(Db *db, Table *default_table, std::unordered_m
     return RC::INVALID_ARGUMENT;
   }
 
-  if (AND_OP == comp || OR_OP == comp) {
-    assert(ExpType::COND == condition.left->type);
-    assert(ExpType::COND == condition.right->type);
-    FilterUnit *left_unit = nullptr;
-    FilterUnit *right_unit = nullptr;
-    rc = create_filter_unit(db, default_table, tables, *condition.left->cexp, left_unit);
+  filter_unit = new FilterUnit;
+
+  if (condition.left_is_attr) {
+    Table           *table = nullptr;
+    const FieldMeta *field = nullptr;
+    rc                     = get_table_and_field(db, default_table, tables, condition.left_attr, table, field);
     if (rc != RC::SUCCESS) {
-      LOG_ERROR("filter unit create left expression failed");
+      LOG_WARN("cannot find attr");
       return rc;
     }
-    rc = create_filter_unit(db, default_table, tables, *condition.right->cexp, right_unit);
-    if (rc != RC::SUCCESS) {
-      LOG_ERROR("filter unit create left expression failed");
-      delete left_unit;
-      return rc;
-    }
-    filter_unit = new FilterUnit;
-    filter_unit->set_comp(comp);
-    filter_unit->set_left_unit(left_unit);
-    filter_unit->set_right_unit(right_unit);
-    return rc;
+    FilterObj filter_obj;
+    filter_obj.init_attr(Field(table, field));
+    filter_unit->set_left(filter_obj);
+  } else {
+    FilterObj filter_obj;
+    filter_obj.init_value(condition.left_value);
+    filter_unit->set_left(filter_obj);
   }
 
-  Expression *left = nullptr;
-  Expression *right = nullptr;
-  rc = Expression::create_expression(condition.left, *tables, std::vector<Table *>{default_table}, left, comp, db);
-  if (rc != RC::SUCCESS) {
-    LOG_ERROR("filter unit create left expression failed");
-    return rc;
+  if (condition.right_is_attr) {
+    Table           *table = nullptr;
+    const FieldMeta *field = nullptr;
+    rc                     = get_table_and_field(db, default_table, tables, condition.right_attr, table, field);
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("cannot find attr");
+      return rc;
+    }
+    FilterObj filter_obj;
+    filter_obj.init_attr(Field(table, field));
+    filter_unit->set_right(filter_obj);
+  } else {
+    FilterObj filter_obj;
+    filter_obj.init_value(condition.right_value);
+    filter_unit->set_right(filter_obj);
   }
-  rc = Expression::create_expression(condition.right, *tables, std::vector<Table *>{default_table}, right, comp, db);
-  if (rc != RC::SUCCESS) {
-    LOG_ERROR("filter unit create right expression failed");
-    delete left;
-    return rc;
-  }
-  filter_unit = new FilterUnit;
+
   filter_unit->set_comp(comp);
-  filter_unit->set_left(left);
-  filter_unit->set_right(right);
 
   // 检查两个类型是否能够比较
   return rc;

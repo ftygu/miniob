@@ -1,4 +1,4 @@
-/* Copyright (c) 2021 Xie Meiyi(xiemeiyi@hust.edu.cn) and OceanBase and/or its affiliates. All rights reserved.
+/* Copyright (c) 2021 OceanBase and/or its affiliates. All rights reserved.
 miniob is licensed under Mulan PSL v2.
 You can use this software according to the terms and conditions of the Mulan PSL v2.
 You may obtain a copy of Mulan PSL v2 at:
@@ -23,13 +23,15 @@ See the Mulan PSL v2 for more details. */
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/un.h>
-#include <unistd.h>
 #include <termios.h>
+#include <time.h>
+#include <unistd.h>
 
 #include "common/defs.h"
 #include "common/lang/string.h"
 
 #ifdef USE_READLINE
+#include "readline/history.h"
 #include "readline/readline.h"
 #endif
 
@@ -39,9 +41,31 @@ See the Mulan PSL v2 for more details. */
 using namespace common;
 
 #ifdef USE_READLINE
+const std::string HISTORY_FILE            = std::string(getenv("HOME")) + "/.miniob.history";
+time_t            last_history_write_time = 0;
+
 char *my_readline(const char *prompt)
 {
-  return readline(prompt);
+  int size = history_length;
+  if (size == 0) {
+    read_history(HISTORY_FILE.c_str());
+
+    FILE *fp = fopen(HISTORY_FILE.c_str(), "a");
+    if (fp != nullptr) {
+      fclose(fp);
+    }
+  }
+
+  char *line = readline(prompt);
+  if (line != nullptr && line[0] != 0) {
+    add_history(line);
+    if (time(NULL) - last_history_write_time > 5) {
+      write_history(HISTORY_FILE.c_str());
+    }
+    // append_history doesn't work on some readlines
+    // append_history(1, HISTORY_FILE.c_str());
+  }
+  return line;
 }
 #else   // USE_READLINE
 char *my_readline(const char *prompt)
@@ -51,7 +75,7 @@ char *my_readline(const char *prompt)
     fprintf(stderr, "failed to alloc line buffer");
     return nullptr;
   }
-  fprintf(stdout, prompt);
+  fprintf(stdout, "%s", prompt);
   char *s = fgets(buffer, MAX_MEM_BUFFER_SIZE, stdin);
   if (nullptr == s) {
     fprintf(stderr, "failed to read message from console");
@@ -94,7 +118,7 @@ int init_unix_sock(const char *unix_sock_path)
 
 int init_tcp_sock(const char *server_host, int server_port)
 {
-  struct hostent *host;
+  struct hostent    *host;
   struct sockaddr_in serv_addr;
 
   if ((host = gethostbyname(server_host)) == NULL) {
@@ -109,8 +133,8 @@ int init_tcp_sock(const char *server_host, int server_port)
   }
 
   serv_addr.sin_family = AF_INET;
-  serv_addr.sin_port = htons(server_port);
-  serv_addr.sin_addr = *((struct in_addr *)host->h_addr);
+  serv_addr.sin_port   = htons(server_port);
+  serv_addr.sin_addr   = *((struct in_addr *)host->h_addr);
   bzero(&(serv_addr.sin_zero), 8);
 
   if (connect(sockfd, (struct sockaddr *)&serv_addr, sizeof(struct sockaddr)) == -1) {
@@ -123,22 +147,16 @@ int init_tcp_sock(const char *server_host, int server_port)
 
 int main(int argc, char *argv[])
 {
-  const char *unix_socket_path = nullptr;
-  const char *server_host = "127.0.0.1";
-  int server_port = PORT_DEFAULT;
-  int opt;
+  const char  *unix_socket_path = nullptr;
+  const char  *server_host      = "127.0.0.1";
+  int          server_port      = PORT_DEFAULT;
+  int          opt;
   extern char *optarg;
   while ((opt = getopt(argc, argv, "s:h:p:")) > 0) {
     switch (opt) {
-      case 's':
-        unix_socket_path = optarg;
-        break;
-      case 'p':
-        server_port = atoi(optarg);
-        break;
-      case 'h':
-        server_host = optarg;
-        break;
+      case 's': unix_socket_path = optarg; break;
+      case 'p': server_port = atoi(optarg); break;
+      case 'h': server_host = optarg; break;
     }
   }
 

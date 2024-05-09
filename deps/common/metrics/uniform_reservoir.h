@@ -1,4 +1,4 @@
-/* Copyright (c) 2021 Xie Meiyi(xiemeiyi@hust.edu.cn) and OceanBase and/or its affiliates. All rights reserved.
+/* Copyright (c) 2021 OceanBase and/or its affiliates. All rights reserved.
 miniob is licensed under Mulan PSL v2.
 You can use this software according to the terms and conditions of the Mulan PSL v2.
 You may obtain a copy of Mulan PSL v2 at:
@@ -11,8 +11,7 @@ See the Mulan PSL v2 for more details. */
 //
 // Created by Longda on 2021/4/20.
 //
-#ifndef __COMMON_METRICS_UNIFORM_RESERVOIR_H_
-#define __COMMON_METRICS_UNIFORM_RESERVOIR_H_
+#pragma once
 
 #include <pthread.h>
 
@@ -31,7 +30,8 @@ namespace common {
  * with a Reservoir</a>
  */
 
-class UniformReservoir : public Reservoir {
+class UniformReservoir : public Reservoir
+{
 public:
   UniformReservoir(RandomGenerator &random);
   UniformReservoir(RandomGenerator &random, size_t size);
@@ -50,12 +50,10 @@ protected:
   void init(size_t size);
 
 protected:
-  pthread_mutex_t mutex;
-  size_t counter;  // counter is likely to be bigger than data.size()
+  pthread_mutex_t     mutex;
+  size_t              counter;  // counter is likely to be bigger than data.size()
   std::vector<double> data;
-  RandomGenerator random;
+  RandomGenerator     random;
 };
 
 }  // namespace common
-
-#endif /* __COMMON_METRICS_UNIFORM_RESERVOIR_H_ */

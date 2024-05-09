@@ -1,4 +1,4 @@
-/* Copyright (c) 2021 Xie Meiyi(xiemeiyi@hust.edu.cn) and OceanBase and/or its affiliates. All rights reserved.
+/* Copyright (c) 2021 OceanBase and/or its affiliates. All rights reserved.
 miniob is licensed under Mulan PSL v2.
 You can use this software according to the terms and conditions of the Mulan PSL v2.
 You may obtain a copy of Mulan PSL v2 at:
@@ -27,7 +27,8 @@ namespace common {
  * are used here to simplify the implementation.
  */
 
-class TimeoutInfo {
+class TimeoutInfo
+{
 public:
   /**
    * Constructor
@@ -68,8 +69,8 @@ private:
 
   bool is_timed_out_;  // timeout flag
 
-  int ref_cnt_;            // reference count of this object
-  pthread_mutex_t mutex_;  // mutex_ to protect ref_cnt_ and flag
+  int             ref_cnt_;  // reference count of this object
+  pthread_mutex_t mutex_;    // mutex_ to protect ref_cnt_ and flag
 };
 
 }  // namespace common

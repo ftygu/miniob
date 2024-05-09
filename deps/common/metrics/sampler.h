@@ -1,4 +1,4 @@
-/* Copyright (c) 2021 Xie Meiyi(xiemeiyi@hust.edu.cn) and OceanBase and/or its affiliates. All rights reserved.
+/* Copyright (c) 2021 OceanBase and/or its affiliates. All rights reserved.
 miniob is licensed under Mulan PSL v2.
 You can use this software according to the terms and conditions of the Mulan PSL v2.
 You may obtain a copy of Mulan PSL v2 at:
@@ -22,19 +22,20 @@ namespace common {
 /**
  * The most simple sample function
  */
-class Sampler {
+class Sampler
+{
 public:
   Sampler();
   virtual ~Sampler();
 
   bool sampling();
 
-  void set_ratio(double ratio);
+  void   set_ratio(double ratio);
   double get_ratio();
 
 private:
-  double ratio_ = 1.0;
-  int ratio_num_ = 1;
+  double          ratio_     = 1.0;
+  int             ratio_num_ = 1;
   RandomGenerator random_;
 };
 

@@ -1,4 +1,4 @@
-/* Copyright (c) 2021 Xie Meiyi(xiemeiyi@hust.edu.cn) and OceanBase and/or its affiliates. All rights reserved.
+/* Copyright (c) 2021 OceanBase and/or its affiliates. All rights reserved.
 miniob is licensed under Mulan PSL v2.
 You can use this software according to the terms and conditions of the Mulan PSL v2.
 You may obtain a copy of Mulan PSL v2 at:
@@ -12,13 +12,12 @@ See the Mulan PSL v2 for more details. */
 // Created by Longda on 2010
 //
 
-#ifndef __COMMON_LANG_STRING_H__
-#define __COMMON_LANG_STRING_H__
+#pragma once
 
 // Basic includes
 #include <cxxabi.h>
-#include <stdlib.h>
 #include <signal.h>
+#include <stdlib.h>
 
 #include <cstdlib>
 #include <iostream>
@@ -34,7 +33,7 @@ namespace common {
 /**
  * remove all white space(like ' ', '\t', '\n') from string
  */
-void strip(std::string &str);
+void  strip(std::string &str);
 char *strip(char *str);
 
 /**
@@ -113,6 +112,26 @@ template <class T>
 void val_to_str(const T &val, std::string &str, std::ios_base &(*radix)(std::ios_base &) = std::dec);
 
 /**
+ * Double to string
+ * @param v
+ * @return
+ */
+std::string double_to_str(double v);
+
+bool is_blank(const char *s);
+
+/**
+ * 获取子串
+ * 从s中提取下标为n1~n2的字符组成一个新字符串，然后返回这个新串的首地址
+ *
+ * @param s
+ * @param n1
+ * @param n2
+ * @return
+ */
+char *substr(const char *s, int n1, int n2);
+
+/**
  * get type's name
  */
 template <class T>
@@ -121,10 +140,10 @@ std::string get_type_name(const T &val);
 template <class T>
 bool str_to_val(const std::string &str, T &val, std::ios_base &(*radix)(std::ios_base &)/* = std::dec */)
 {
-  bool success = true;
+  bool               success = true;
   std::istringstream is(str);
   if (!(is >> radix >> val)) {
-    val = 0;
+    val     = 0;
     success = false;
   }
   return success;
@@ -141,8 +160,8 @@ void val_to_str(const T &val, std::string &str, std::ios_base &(*radix)(std::ios
 template <class T>
 std::string get_type_name(const T &val)
 {
-  int status = 0;
-  char *stmp = abi::__cxa_demangle(typeid(val).name(), 0, 0, &status);
+  int   status = 0;
+  char *stmp   = abi::__cxa_demangle(typeid(val).name(), 0, 0, &status);
   if (!stmp)
     return "";
 
@@ -152,7 +171,4 @@ std::string get_type_name(const T &val)
   return sret;
 }
 
-bool is_blank(const char *s);
-
 }  // namespace common
-#endif  // __COMMON_LANG_STRING_H__

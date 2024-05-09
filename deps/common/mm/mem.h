@@ -1,4 +1,4 @@
-/* Copyright (c) 2021 Xie Meiyi(xiemeiyi@hust.edu.cn) and OceanBase and/or its affiliates. All rights reserved.
+/* Copyright (c) 2021 OceanBase and/or its affiliates. All rights reserved.
 miniob is licensed under Mulan PSL v2.
 You can use this software according to the terms and conditions of the Mulan PSL v2.
 You may obtain a copy of Mulan PSL v2 at:
@@ -12,8 +12,7 @@ See the Mulan PSL v2 for more details. */
 // Created by Longda on 2010
 //
 
-#ifndef __COMMON_MM_MEM_H__
-#define __COMMON_MM_MEM_H__
+#pragma once
 
 #include <stdlib.h>
 #include <string.h>
@@ -31,16 +30,18 @@ namespace common {
 
 #else
 
-typedef struct MemID_t {
+typedef struct MemID_t
+{
 public:
   const static int MEM_FILENAME_LEN = 32;
-  struct MemID_t *mNext;
-  char mFile[MEM_FILENAME_LEN];
-  u64_t mSize;
-  u32_t mLine;
+  struct MemID_t  *mNext;
+  char             mFile[MEM_FILENAME_LEN];
+  uint64_t         mSize;
+  uint32_t         mLine;
 } MemID;
 
-class CLMemTrace {
+class CLMemTrace
+{
 public:
   static void *malloc(size_t size, const char *file, const int line, bool retry = false) throw(std::bad_alloc);
 
@@ -54,10 +55,7 @@ public:
   /**
    * set whether show every details
    */
-  static void setVerbose(bool verbose)
-  {
-    mVerbose = verbose;
-  }
+  static void setVerbose(bool verbose) { mVerbose = verbose; }
 
 protected:
   static std::new_handler getNewHandler();
@@ -69,10 +67,10 @@ protected:
   // static std::map<void *, CMemID> mMemIds;
   const static int MEM_HASHTABLE_SIZE = 16384;
 
-  static MemID *mMemIDs[MEM_HASHTABLE_SIZE];
-  static u64_t mUsedSize;
+  static MemID          *mMemIDs[MEM_HASHTABLE_SIZE];
+  static uint64_t        mUsedSize;
   static pthread_mutex_t mMutex;
-  static bool mVerbose;
+  static bool            mVerbose;
 };
 
 #define lcalloc(nmemb, size) Lcalloc(nmemb, size, __FILE__, __LINE__)
@@ -85,7 +83,7 @@ protected:
 
 void *Lcalloc(size_t nmemb, size_t size, const char *file, const int line);
 void *Lmalloc(size_t size, const char *file, const int line);
-void Lfree(void *ptr);
+void  Lfree(void *ptr);
 void *Lrealloc(void *ptr, size_t size, const char *file, const int line);
 
 /**
@@ -132,4 +130,3 @@ static void operator delete[](void *pointer);
 #endif /* MEM_DEBUG */
 
 }  // namespace common
-#endif /* __COMMON_MM_MEM_H__ */

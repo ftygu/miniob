@@ -1,4 +1,4 @@
-/* Copyright (c) 2021 Xie Meiyi(xiemeiyi@hust.edu.cn) and OceanBase and/or its affiliates. All rights reserved.
+/* Copyright (c) 2021 OceanBase and/or its affiliates. All rights reserved.
 miniob is licensed under Mulan PSL v2.
 You can use this software according to the terms and conditions of the Mulan PSL v2.
 You may obtain a copy of Mulan PSL v2 at:
@@ -21,9 +21,15 @@ namespace common {
 /**
  * Through this type to determine object type
  */
-enum { MESSAGE_BASIC = 100, MESSAGE_BASIC_REQUEST = 1000, MESSAGE_BASIC_RESPONSE = -1000 };
+enum
+{
+  MESSAGE_BASIC          = 100,
+  MESSAGE_BASIC_REQUEST  = 1000,
+  MESSAGE_BASIC_RESPONSE = -1000
+};
 
-class Deserializable {
+class Deserializable
+{
 public:
   /*
    * deserialize buffer to one object
@@ -33,7 +39,8 @@ public:
   virtual void *deserialize(const char *buffer, int bufLen) = 0;
 };
 
-class Serializable {
+class Serializable
+{
 public:
   /*
    * serialize this object to bytes

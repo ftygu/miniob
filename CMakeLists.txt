@@ -1,21 +1,23 @@
-include(clang_check.cmake)
-# include 另外一个cmake 配置
-#INCLUDE(file1 [OPTIONAL])
-
 cmake_minimum_required(VERSION 3.10)
-set(CMAKE_CXX_STANDARD 14)
-#SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
+set(CMAKE_CXX_STANDARD 20)
 
 project(minidb)
 
-MESSAGE(STATUS "This is SOURCE dir " ${test_SOURCE_DIR})
-MESSAGE(STATUS "This is BINARY dir " ${test_BINARY_DIR})
 MESSAGE(STATUS "This is Project source dir " ${PROJECT_SOURCE_DIR})
 MESSAGE(STATUS "This is PROJECT_BINARY_DIR dir " ${PROJECT_BINARY_DIR})
 
-
 SET(EXECUTABLE_OUTPUT_PATH ${PROJECT_BINARY_DIR}/bin)
-#SET(LIBRARY_OUTPUT_PATH <路径>)
+
+SET(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_SOURCE_DIR}/cmake)
+
+OPTION(ENABLE_ASAN "Enable build with address sanitizer" ON)
+OPTION(ENABLE_TSAN "Build with thread sanitizer" OFF)
+OPTION(ENABLE_UBSAN "Build with undefined behavior sanitizer" OFF)
+OPTION(WITH_UNIT_TESTS "Compile miniob with unit tests" ON)
+OPTION(WITH_BENCHMARK "Compile benchmark" OFF)
+OPTION(ENABLE_COVERAGE "Enable unittest coverage" OFF)
+OPTION(CONCURRENCY "Support concurrency operations" OFF)
+OPTION(STATIC_STDLIB "Link std library static or dynamic, such as libgcc, libstdc++, libasan" OFF)
 
 MESSAGE(STATUS "HOME dir: $ENV{HOME}")
 #SET(ENV{变量名} 值)
@@ -23,8 +25,8 @@ IF(WIN32)
     MESSAGE(STATUS "This is windows.")
     ADD_DEFINITIONS(-DWIN32)
 ELSEIF(WIN64)
-        MESSAGE(STATUS "This is windows.")
-        ADD_DEFINITIONS(-DWIN64)
+    MESSAGE(STATUS "This is windows.")
+    ADD_DEFINITIONS(-DWIN64)
 ELSEIF(APPLE)
     MESSAGE(STATUS "This is apple")
     # normally __MACH__ has already been defined
@@ -37,88 +39,119 @@ ELSE()
 ENDIF(WIN32)
 
 # This is for clangd plugin for vscode
-#SET(CMAKE_COMMON_FLAGS ${CMAKE_COMMON_FLAGS} " -Wstring-plus-int -Wsizeof-array-argument -Wunused-variable -Wmissing-braces")
-SET(CMAKE_COMMON_FLAGS "${CMAKE_COMMON_FLAGS} -Wall -DCMAKE_EXPORT_COMPILE_COMMANDS=1")
+SET(CMAKE_COMMON_FLAGS "${CMAKE_COMMON_FLAGS} -Wall -Werror")
 IF(DEBUG)
-    MESSAGE("DEBUG has been set as TRUE ${DEBUG}")
-    #"${CMAKE_COMMON_FLAGS}  -O0 -g "  ${CMAKE_COMMON_FLAGS}最好在""以内，防止被cmake 增加了;
+    MESSAGE(STATUS "DEBUG has been set as TRUE ${DEBUG}")
     SET(CMAKE_COMMON_FLAGS "${CMAKE_COMMON_FLAGS}  -O0 -g -DDEBUG ")
     ADD_DEFINITIONS(-DENABLE_DEBUG)
 ELSEIF(NOT DEFINED ENV{DEBUG})
-    MESSAGE("Disable debug")
+    MESSAGE(STATUS "Disable debug")
     SET(CMAKE_COMMON_FLAGS "${CMAKE_COMMON_FLAGS}  -O2 -g ")
 ELSE()
-    MESSAGE("Enable debug")
+    MESSAGE(STATUS "Enable debug")
     SET(CMAKE_COMMON_FLAGS "${CMAKE_COMMON_FLAGS}  -O0 -g -DDEBUG")
     ADD_DEFINITIONS(-DENABLE_DEBUG)
-ENDIF()
-SET(CMAKE_CXX_FLAGS ${CMAKE_COMMON_FLAGS})
-SET(CMAKE_C_FLAGS ${CMAKE_COMMON_FLAGS})
-MESSAGE("CMAKE_CXX_FLAGS is " ${CMAKE_CXX_FLAGS})
+ENDIF(DEBUG)
 
-OPTION(ENABLE_ASAN OFF "Enable build with address sanitizer")
+IF (CONCURRENCY)
+    MESSAGE(STATUS "CONCURRENCY is ON")
+    SET(CMAKE_COMMON_FLAGS "${CMAKE_COMMON_FLAGS} -DCONCURRENCY")
+    ADD_DEFINITIONS(-DCONCURRENCY)
+ENDIF (CONCURRENCY)
+
+MESSAGE(STATUS "CMAKE_CXX_COMPILER_ID is " ${CMAKE_CXX_COMPILER_ID})
+IF ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU" AND ${STATIC_STDLIB})
+    ADD_LINK_OPTIONS(-static-libgcc -static-libstdc++)
+ENDIF()
 
 IF (ENABLE_ASAN)
-    SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fno-omit-frame-pointer -fsanitize=address")
-    SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-omit-frame-pointer -fsanitize=address")
-    SET(CMAKE_LINKER_FLAGS_DEBUG  "${CMAKE_LINKER_FLAGS_DEBUG} -fno-omit-frame-pointer -fsanitize=address")
+    MESSAGE(STATUS "Instrumenting with Address Sanitizer")
+    SET(CMAKE_COMMON_FLAGS "${CMAKE_COMMON_FLAGS} -fno-omit-frame-pointer -fsanitize=address -fsanitize-address-use-after-scope")
+    IF ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU" AND ${STATIC_STDLIB})
+        ADD_LINK_OPTIONS(-static-libasan)
+    ENDIF()
 ENDIF()
 
+IF (ENABLE_TSAN)
+    # supported flags
+    # https://github.com/google/sanitizers/wiki/ThreadSanitizerFlags
+    MESSAGE(STATUS "Instrumenting with Thread Sanitizer")
+    SET(TSAN_FLAGS "-fno-omit-frame-pointer -fsanitize=thread")
+    SET(TSAN_CCFLAGS "${TSAN_CCFLAGS} -mllvm -tsan-instrument-memory-accesses=0")
+    SET(TSAN_CCFLAGS "${TSAN_CCFLAGS} -mllvm -tsan-instrument-atomics=0")
+    SET(TSAN_CCFLAGS "${TSAN_CCFLAGS} -mllvm -tsan-instrument-func-entry-exit=1")
+    SET(CMAKE_COMMON_FLAGS "${CMAKE_COMMON_FLAGS} ${TSAN_FLAGS} ${TSAN_CCFLAGS}")
+    # -Qunused-arguments 有些编译器不支持，所以先删掉
+    IF ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU" AND ${STATIC_STDLIB})
+        ADD_LINK_OPTIONS(-static-libtsan)
+    ENDIF()
+    SET(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${TSAN_FLAGS}")
+    SET(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${TSAN_FLAGS}")
+ENDIF (ENABLE_TSAN)
+
+IF (ENABLE_UBSAN)
+    # Only success on Mac Clang
+    MESSAGE(STATUS "Instrumenting with Undefined Behavior Sanitizer")
+    SET(UBSAN_FLAGS "${UBSAN_FLAGS} -fno-omit-frame-pointer")
+    SET(UBSAN_FLAGS "${UBSAN_FLAGS} -fsanitize=undefined")
+    SET(UBSAN_FLAGS "${UBSAN_FLAGS} -fsanitize=implicit-conversion")
+    SET(UBSAN_FLAGS "${UBSAN_FLAGS} -fsanitize=implicit-integer-truncation")
+    SET(UBSAN_FLAGS "${UBSAN_FLAGS} -fsanitize=integer")
+    SET(UBSAN_FLAGS "${UBSAN_FLAGS} -fsanitize=nullability")
+    SET(UBSAN_FLAGS "${UBSAN_FLAGS} -fsanitize=vptr")
+    SET(CMAKE_COMMON_FLAGS "${CMAKE_COMMON_FLAGS} ${UBSAN_FLAGS}")
+    SET(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${UBSAN_FLAGS}")
+    SET(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${UBSAN_FLAGS}")
+ENDIF (ENABLE_UBSAN)
+
 IF (CMAKE_INSTALL_PREFIX)
-    MESSAGE("CMAKE_INSTALL_PREFIX has been set as " ${CMAKE_INSTALL_PREFIX} )
+    MESSAGE(STATUS "CMAKE_INSTALL_PREFIX has been set as " ${CMAKE_INSTALL_PREFIX} )
 ELSEIF(DEFINED ENV{CMAKE_INSTALL_PREFIX})
     SET(CMAKE_INSTALL_PREFIX $ENV{CMAKE_INSTALL_PREFIX})
 ELSE()
     SET(CMAKE_INSTALL_PREFIX /tmp/${PROJECT_NAME})
 ENDIF()
-MESSAGE("Install target dir is " ${CMAKE_INSTALL_PREFIX})
+MESSAGE(STATUS "Install target dir is " ${CMAKE_INSTALL_PREFIX})
 
+IF (DEFINED ENV{LD_LIBRARY_PATH})
+    SET(LD_LIBRARY_PATH_STR $ENV{LD_LIBRARY_PATH})
+    string(REPLACE ":" ";" LD_LIBRARY_PATH_LIST ${LD_LIBRARY_PATH_STR})
+    MESSAGE(" Add LD_LIBRARY_PATH to -L flags " ${LD_LIBRARY_PATH_LIST})
+    LINK_DIRECTORIES(${LD_LIBRARY_PATH_LIST})
+ENDIF ()
+
+IF (EXISTS /usr/local/lib)
+    LINK_DIRECTORIES (/usr/local/lib)
+ENDIF ()
+IF (EXISTS /usr/local/lib64)
+    LINK_DIRECTORIES (/usr/local/lib64)
+ENDIF ()
+
+INCLUDE_DIRECTORIES(. ${PROJECT_SOURCE_DIR}/deps /usr/local/include)
+
+IF(WITH_UNIT_TESTS)
+    IF (ENABLE_COVERAGE)
+        SET(CMAKE_COMMON_FLAGS "${CMAKE_COMMON_FLAGS} -fprofile-arcs -ftest-coverage")
+    ENDIF (ENABLE_COVERAGE)
+    enable_testing()
+ENDIF(WITH_UNIT_TESTS)
+
+SET(CMAKE_CXX_FLAGS ${CMAKE_COMMON_FLAGS})
+SET(CMAKE_C_FLAGS ${CMAKE_COMMON_FLAGS})
+MESSAGE(STATUS "CMAKE_CXX_FLAGS is " ${CMAKE_CXX_FLAGS})
 
 # ADD_SUBDIRECTORY(src bin)  bin 为目标目录， 可以省略
 ADD_SUBDIRECTORY(deps)
-ADD_SUBDIRECTORY(src)
+ADD_SUBDIRECTORY(src/obclient)
+ADD_SUBDIRECTORY(src/observer)
 ADD_SUBDIRECTORY(test/perf)
+ADD_SUBDIRECTORY(tools)
 
-# OPTION(WITH_UNIT_TESTS "Compile miniob with unit tests" ON)
+IF (WITH_BENCHMARK)
+    ADD_SUBDIRECTORY(benchmark)
+ENDIF(WITH_BENCHMARK)
 
-# IF(WITH_UNIT_TESTS)
-#     ADD_SUBDIRECTORY(unitest)
-# ENDIF()
+IF(WITH_UNIT_TESTS)
+    ADD_SUBDIRECTORY(unittest)
+ENDIF(WITH_UNIT_TESTS)
 
-# install 准备安装的目录是cmakefile 的当前目录， 不是build 后生成的目录
-# Files 默认权限OWNER_WRITE, OWNER_READ, GROUP_READ,和WORLD_READ，即644权限
-# INSTALL(FILES docs/README DESTINATION ./  )
-# INSTALL(DIRECTORY docs DESTINATION ./
-#        PATTERN "README" EXCLUDE)
-#  PERMISSIONS 可以直接替换
-#INSTALL(DIRECTORY bin DESTINATION ./
-#        FILE_PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ GROUP_EXECUTE GROUP_READ WORLD_READ
-#        DIRECTORY_PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ GROUP_EXECUTE GROUP_READ WORLD_READ WORLD_EXECUTE)
-
-INSTALL(DIRECTORY etc DESTINATION .
-		FILE_PERMISSIONS OWNER_WRITE OWNER_READ GROUP_READ WORLD_READ)
-
-#INSTALL([[SCRIPT <file>] [CODE <code>]] [...])
-# script 表示安装时，调用cmake 脚步
-# code 表示安装时，执行cmake 命令， 例如
-INSTALL(CODE "MESSAGE(\"Sample install message.\")")
-# EXEC_PROGRAM make时执行命令
-#EXEC_PROGRAM(Executable [directory in which to run]
-#        [ARGS <arguments to executable>]
-#        [OUTPUT_VARIABLE <var>]
-
-
-
-
-# ADD_TEST与ENABLE_TESTING 参考书籍
-
-#EXEC_PROGRAM(Executable [directory in which to run]
-#        [ARGS <arguments to executable>]
-#        [OUTPUT_VARIABLE <var>]
-#        [RETURN_VALUE <var>])
-# 生产make时，执行
-#EXEC_PROGRAM(ls ARGS "*.c" OUTPUT_VARIABLE LS_OUTPUT RETURN_VALUE
-#        LS_RVALUE)
-#IF(not LS_RVALUE)
-#    MESSAGE(STATUS "ls result: " ${LS_OUTPUT})
-#ENDIF(not LS_RVALUE)

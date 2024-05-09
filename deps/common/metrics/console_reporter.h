@@ -1,4 +1,4 @@
-/* Copyright (c) 2021 Xie Meiyi(xiemeiyi@hust.edu.cn) and OceanBase and/or its affiliates. All rights reserved.
+/* Copyright (c) 2021 OceanBase and/or its affiliates. All rights reserved.
 miniob is licensed under Mulan PSL v2.
 You can use this software according to the terms and conditions of the Mulan PSL v2.
 You may obtain a copy of Mulan PSL v2 at:
@@ -19,7 +19,8 @@ See the Mulan PSL v2 for more details. */
 
 namespace common {
 
-class ConsoleReporter : public Reporter {
+class ConsoleReporter : public Reporter
+{
 public:
   void report(const std::string &tag, Metric *metric);
 };

@@ -1,4 +1,4 @@
-/* Copyright (c) 2021 Xie Meiyi(xiemeiyi@hust.edu.cn) and OceanBase and/or its affiliates. All rights reserved.
+/* Copyright (c) 2021 OceanBase and/or its affiliates. All rights reserved.
 miniob is licensed under Mulan PSL v2.
 You can use this software according to the terms and conditions of the Mulan PSL v2.
 You may obtain a copy of Mulan PSL v2 at:
@@ -12,8 +12,7 @@ See the Mulan PSL v2 for more details. */
 // Created by Longda on 2010
 //
 
-#ifndef __COMMON_OS_SIGNAL_H__
-#define __COMMON_OS_SIGNAL_H__
+#pragma once
 
 #include <signal.h>
 
@@ -23,23 +22,22 @@ namespace common {
 /**
  * Now it blocks SIGINT, SIGTERM, and SIGUSR1
  */
-void blockDefaultSignals(sigset_t *signal_set, sigset_t *old_set);
+void block_default_signals(sigset_t *signal_set, sigset_t *old_set);
 //! Default function that unblocks signals.
 /**
  * It unblocks SIGINT, SIGTERM,and SIGUSR1.
  */
-void unBlockDefaultSignals(sigset_t *signal_set, sigset_t *old_set);
+void unblock_default_signals(sigset_t *signal_set, sigset_t *old_set);
 
-void *waitForSignals(sigset_t *signal_set);
-void startWaitForSignals(sigset_t *signal_set);
+void *wait_for_signals(sigset_t *signal_set);
+void  start_wait_for_signals(sigset_t *signal_set);
 
 // Set signal handling function
 /**
  * handler function
  */
 typedef void (*sighandler_t)(int);
-void setSignalHandler(sighandler_t func);
-void setSignalHandler(int sig, sighandler_t func);
+void set_signal_handler(sighandler_t func);
+void set_signal_handler(int sig, sighandler_t func);
 
 }  // namespace common
-#endif /* __COMMON_OS_SIGNAL_H__ */

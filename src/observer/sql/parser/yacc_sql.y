@@ -1,108 +1,73 @@
 
 %{
 
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <algorithm>
+
+#include "common/log/log.h"
+#include "common/lang/string.h"
 #include "sql/parser/parse_defs.h"
-#include "sql/parser/yacc_sql.tab.h"
-#include "sql/parser/lex.yy.h"
-// #include "common/log/log.h" // 包含C++中的头文件
+#include "sql/parser/yacc_sql.hpp"
+#include "sql/parser/lex_sql.h"
+#include "sql/expr/expression.h"
 
-#include<stdio.h>
-#include<stdlib.h>
-#include<string.h>
+using namespace std;
 
-#define TRUE 1
-#define FALSE 0
-
-typedef struct ParserContext {
-  Query * ssql;
-  size_t value_length;
-  Value values[MAX_NUM];
-  size_t condition_length;
-  Condition conditions[MAX_NUM];
-  size_t having_length;
-  Condition havings[MAX_NUM];
-  size_t orderby_length;
-  OrderBy orderbys[MAX_NUM];
-  size_t groupby_length;
-  GroupBy groupbys[MAX_NUM];
-  size_t from_length;
-  Relation froms[MAX_NUM];
-  size_t project_length;
-  ProjectCol projects[MAX_NUM];
-  CompOp comp;
-	char id[MAX_NUM];
-  AggrFuncType aggrfunctype;
-} ParserContext;
-
-typedef struct _FromInfo {
-  int from_len;
-  int inner_join_conditions_len;
-} FromInfo;
-
-//获取子串
-char *substr(const char *s,int n1,int n2)/*从s中提取下标为n1~n2的字符组成一个新字符串，然后返回这个新串的首地址*/
+string token_name(const char *sql_string, YYLTYPE *llocp)
 {
-  char *sp = malloc(sizeof(char) * (n2 - n1 + 2));
-  int i, j = 0;
-  for (i = n1; i <= n2; i++) {
-    sp[j++] = s[i];
-  }
-  sp[j] = 0;
-  return sp;
+  return string(sql_string + llocp->first_column, llocp->last_column - llocp->first_column + 1);
 }
 
-//从字符串指定位置开始，查找指定字符第一次出现的位置
-int find(const char *s, int b, const char *t)
+int yyerror(YYLTYPE *llocp, const char *sql_string, ParsedSqlResult *sql_result, yyscan_t scanner, const char *msg)
 {
-  int i;
-  for (i = b; i < strlen(s); i++) {
-		if (s[i] == *t)	return i;
-  }
-  return -1;
+  std::unique_ptr<ParsedSqlNode> error_sql_node = std::make_unique<ParsedSqlNode>(SCF_ERROR);
+  error_sql_node->error.error_msg = msg;
+  error_sql_node->error.line = llocp->first_line;
+  error_sql_node->error.column = llocp->first_column;
+  sql_result->add_sql_node(std::move(error_sql_node));
+  return 0;
 }
 
-void yyerror(yyscan_t scanner, const char *str)
+ArithmeticExpr *create_arithmetic_expression(ArithmeticExpr::Type type,
+                                             Expression *left,
+                                             Expression *right,
+                                             const char *sql_string,
+                                             YYLTYPE *llocp)
 {
-  ParserContext *context = (ParserContext *)(yyget_extra(scanner));
-  query_reset(context->ssql);
-  context->ssql->flag = SCF_ERROR;
-  context->condition_length = 0;
-  context->orderby_length = 0;
-  context->from_length = 0;
-  context->value_length = 0;
-  context->having_length = 0;
-  context->groupby_length = 0;
-  context->project_length = 0;
-  context->ssql->sstr.insertion.value_num = 0;
-  printf("parse sql failed. error=%s", str);
+  ArithmeticExpr *expr = new ArithmeticExpr(type, left, right);
+  expr->set_name(token_name(sql_string, llocp));
+  return expr;
 }
-
-ParserContext *get_context(yyscan_t scanner)
-{
-  return (ParserContext *)yyget_extra(scanner);
-}
-
-#define CONTEXT get_context(scanner)
 
 %}
 
 %define api.pure full
+%define parse.error verbose
+/** 启用位置标识 **/
+%locations
 %lex-param { yyscan_t scanner }
-%parse-param { void *scanner }
+/** 这些定义了在yyparse函数中的参数 **/
+%parse-param { const char * sql_string }
+%parse-param { ParsedSqlResult * sql_result }
+%parse-param { void * scanner }
 
 //标识tokens
 %token  SEMICOLON
+        SUM_F
+        AVG_F
+        MAX_F
+        MIN_F
+        COUNT_F
         CREATE
         DROP
         TABLE
         TABLES
         INDEX
-        INNER
-        JOIN
+        CALC
         SELECT
         DESC
-        ASC
-        AS
         SHOW
         SYNC
         INSERT
@@ -115,22 +80,10 @@ ParserContext *get_context(yyscan_t scanner)
         TRX_COMMIT
         TRX_ROLLBACK
         INT_T
+        DATE_T
         STRING_T
-				DATE_T
         FLOAT_T
-        ORDER
-        GROUP
-        BY
-        IN
-        EXISTS
-        HAVING
-        AGGR_MAX
-        AGGR_MIN
-        AGGR_SUM
-        AGGR_AVG
-        AGGR_COUNT
         HELP
-        TEXT
         EXIT
         DOT //QUOTE
         INTO
@@ -138,1152 +91,682 @@ ParserContext *get_context(yyscan_t scanner)
         FROM
         WHERE
         AND
-        OR
         SET
         ON
         LOAD
         DATA
         INFILE
-        NOT
-        LIKE
-				UNIQUE
-        ADD
-        SUB
-        MUL
-        DIV
-        IS
-        NULL_VALUE
-        NULLABLE
+        EXPLAIN
         EQ
         LT
         GT
         LE
         GE
         NE
-        LENGTH
-        ROUND
-        DATE_FORMAT
 
+/** union 中定义各种数据类型，真实生成的代码也是union类型，所以不能有非POD类型的数据 **/
 %union {
-  struct _Attr *attr;
-  struct _Condition *condition1;
-  struct _Value *value1;
-  struct _UnaryExpr* uexp1;
-  struct _Expr* exp1;
-  struct _Expr* exp2;
-  struct _Expr* exp3;
-  struct _Expr* exp4;
-  struct _Expr* exp5;
-  struct _Expr* exp6;
-  struct _Expr* exp7;
-  struct _Expr* exp8;
-  struct _FromInfo* from_info;
-  char *string;
-  int number;
-  float floats;
-	char *position;
-  int cur_len;
-  int comp_op;
+  ParsedSqlNode *                   sql_node;
+  ConditionSqlNode *                condition;
+  Value *                           value;
+  enum CompOp                       comp;
+  enum AggrOp                       aggr;
+  RelAttrSqlNode *                  rel_attr;
+  std::vector<AttrInfoSqlNode> *    attr_infos;
+  AttrInfoSqlNode *                 attr_info;
+  Expression *                      expression;
+  std::vector<Expression *> *       expression_list;
+  std::vector<Value> *              value_list;
+  std::vector<ConditionSqlNode> *   condition_list;
+  std::vector<RelAttrSqlNode> *     rel_attr_list;
+  std::vector<std::string> *        relation_list;
+  char *                            string;
+  int                               number;
+  float                             floats;
 }
 
 %token <number> NUMBER
-%token <floats> FLOAT 
+%token <floats> FLOAT
 %token <string> ID
-%token <string> PATH
 %token <string> SSS
-%token <string> STAR
-%token <string> STRING_V
 %token <string> DATE_STR
 //非终结符
 
-%type <number> type;
-%type <value1> value;
-%type <number> number;
-%type <exp1> unary_expr;
-%type <exp2> mul_expr;
-%type <exp3> add_expr;
-%type <exp4> func_expr;
-%type <exp5> aggr_func_expr;
-%type <exp6> sub_select;
-%type <exp7> sub_select_list;
-%type <cur_len> select_attr;
-%type <cur_len> attr_list;
-%type <from_info> from;
-%type <from_info> rel_list;
-%type <cur_len> inner_join_conditions;
-%type <cur_len> where;
-%type <cur_len> condition_list;
-%type <cur_len> opt_group_by;
-%type <cur_len> groupby_list;
-%type <cur_len> opt_having;
-%type <cur_len> having_condition_list;
-%type <cur_len> opt_order_by;
-%type <cur_len> sort_list;
-%type <cur_len> value_list;
-%type <comp_op> comOp;
-%type <exp8> select_where;
-%type <exp8> condition_and;
-%type <exp8> condition_or;
+/** type 定义了各种解析后的结果输出的是什么类型。类型对应了 union 中的定义的成员变量名称 **/
+%type <number>              type
+%type <condition>           condition
+%type <value>               value
+%type <number>              number
+%type <comp>                comp_op
+%type <aggr>                aggr_op
+%type <rel_attr>            rel_attr
+%type <rel_attr>            rel_attr_aggr
+%type <rel_attr_list>       rel_attr_aggr_list
+%type <attr_infos>          attr_def_list
+%type <attr_info>           attr_def
+%type <value_list>          value_list
+%type <condition_list>      where
+%type <condition_list>      condition_list
+%type <rel_attr_list>       select_attr
+%type <rel_attr_list>       attr_list
+%type <relation_list>       rel_list
+%type <expression>          expression
+%type <expression_list>     expression_list
+%type <sql_node>            calc_stmt
+%type <sql_node>            select_stmt
+%type <sql_node>            insert_stmt
+%type <sql_node>            update_stmt
+%type <sql_node>            delete_stmt
+%type <sql_node>            create_table_stmt
+%type <sql_node>            drop_table_stmt
+%type <sql_node>            show_tables_stmt
+%type <sql_node>            desc_table_stmt
+%type <sql_node>            create_index_stmt
+%type <sql_node>            drop_index_stmt
+%type <sql_node>            sync_stmt
+%type <sql_node>            begin_stmt
+%type <sql_node>            commit_stmt
+%type <sql_node>            rollback_stmt
+%type <sql_node>            load_data_stmt
+%type <sql_node>            explain_stmt
+%type <sql_node>            set_variable_stmt
+%type <sql_node>            help_stmt
+%type <sql_node>            exit_stmt
+%type <sql_node>            command_wrapper
+// commands should be a list but I use a single command instead
+%type <sql_node>            commands
 
+%left '+' '-'
+%left '*' '/'
+%nonassoc UMINUS
 %%
 
-commands:		//commands or sqls. parser starts here.
-    /* empty */
-    | commands command
+commands: command_wrapper opt_semicolon  //commands or sqls. parser starts here.
+  {
+    std::unique_ptr<ParsedSqlNode> sql_node = std::unique_ptr<ParsedSqlNode>($1);
+    sql_result->add_sql_node(std::move(sql_node));
+  }
+  ;
+
+command_wrapper:
+    calc_stmt
+  | select_stmt
+  | insert_stmt
+  | update_stmt
+  | delete_stmt
+  | create_table_stmt
+  | drop_table_stmt
+  | show_tables_stmt
+  | desc_table_stmt
+  | create_index_stmt
+  | drop_index_stmt
+  | sync_stmt
+  | begin_stmt
+  | commit_stmt
+  | rollback_stmt
+  | load_data_stmt
+  | explain_stmt
+  | set_variable_stmt
+  | help_stmt
+  | exit_stmt
     ;
 
-command:
-	  select  
-	| insert
-	| update
-	| delete
-	| create_table
-	| drop_table
-	| show_tables
-	| desc_table
-	| show_index
-	| create_index	
-	| drop_index
-	| sync
-	| begin
-	| commit
-	| rollback
-	| load_data
-	| help
-	| exit
-    ;
-
-exit:			
-    EXIT SEMICOLON {
-        CONTEXT->ssql->flag=SCF_EXIT;//"exit";
+exit_stmt:      
+    EXIT {
+      (void)yynerrs;  // 这么写为了消除yynerrs未使用的告警。如果你有更好的方法欢迎提PR
+      $$ = new ParsedSqlNode(SCF_EXIT);
     };
 
-help:
-    HELP SEMICOLON {
-        CONTEXT->ssql->flag=SCF_HELP;//"help";
+help_stmt:
+    HELP {
+      $$ = new ParsedSqlNode(SCF_HELP);
     };
 
-sync:
-    SYNC SEMICOLON {
-      CONTEXT->ssql->flag = SCF_SYNC;
+sync_stmt:
+    SYNC {
+      $$ = new ParsedSqlNode(SCF_SYNC);
     }
     ;
 
-begin:
-    TRX_BEGIN SEMICOLON {
-      CONTEXT->ssql->flag = SCF_BEGIN;
+begin_stmt:
+    TRX_BEGIN  {
+      $$ = new ParsedSqlNode(SCF_BEGIN);
     }
     ;
 
-commit:
-    TRX_COMMIT SEMICOLON {
-      CONTEXT->ssql->flag = SCF_COMMIT;
+commit_stmt:
+    TRX_COMMIT {
+      $$ = new ParsedSqlNode(SCF_COMMIT);
     }
     ;
 
-rollback:
-    TRX_ROLLBACK SEMICOLON {
-      CONTEXT->ssql->flag = SCF_ROLLBACK;
+rollback_stmt:
+    TRX_ROLLBACK  {
+      $$ = new ParsedSqlNode(SCF_ROLLBACK);
     }
     ;
 
-drop_table:		/*drop table 语句的语法解析树*/
-    DROP TABLE ID SEMICOLON {
-        CONTEXT->ssql->flag = SCF_DROP_TABLE;//"drop_table";
-        drop_table_init(&CONTEXT->ssql->sstr.drop_table, $3);
+drop_table_stmt:    /*drop table 语句的语法解析树*/
+    DROP TABLE ID {
+      $$ = new ParsedSqlNode(SCF_DROP_TABLE);
+      $$->drop_table.relation_name = $3;
+      free($3);
     };
 
-show_tables:
-    SHOW TABLES SEMICOLON {
-      CONTEXT->ssql->flag = SCF_SHOW_TABLES;
+show_tables_stmt:
+    SHOW TABLES {
+      $$ = new ParsedSqlNode(SCF_SHOW_TABLES);
     }
     ;
 
-desc_table:
-    DESC ID SEMICOLON {
-      CONTEXT->ssql->flag = SCF_DESC_TABLE;
-      desc_table_init(&CONTEXT->ssql->sstr.desc_table, $2);
+desc_table_stmt:
+    DESC ID  {
+      $$ = new ParsedSqlNode(SCF_DESC_TABLE);
+      $$->desc_table.relation_name = $2;
+      free($2);
     }
     ;
 
-show_index:
-		SHOW INDEX FROM ID SEMICOLON 
-		{
-			CONTEXT->ssql->flag = SCF_SHOW_INDEX;
-			desc_table_init(&CONTEXT->ssql->sstr.desc_table, $4);
-		}
-		;
-
-create_index:		/*create index 语句的语法解析树*/
-    CREATE INDEX ID ON ID LBRACE id id_list RBRACE SEMICOLON 
-		{
-			CONTEXT->ssql->flag = SCF_CREATE_INDEX;			//"create_index";
-			create_index_init(&CONTEXT->ssql->sstr.create_index, false, $3, $5);
-		}
-		|CREATE UNIQUE INDEX ID ON ID LBRACE id id_list RBRACE SEMICOLON 
-		{
-			CONTEXT->ssql->flag = SCF_CREATE_INDEX;			//"create_index";
-			create_index_init(&CONTEXT->ssql->sstr.create_index, true, $4, $6);
-		}
+create_index_stmt:    /*create index 语句的语法解析树*/
+    CREATE INDEX ID ON ID LBRACE ID RBRACE
+    {
+      $$ = new ParsedSqlNode(SCF_CREATE_INDEX);
+      CreateIndexSqlNode &create_index = $$->create_index;
+      create_index.index_name = $3;
+      create_index.relation_name = $5;
+      create_index.attribute_name = $7;
+      free($3);
+      free($5);
+      free($7);
+    }
     ;
 
-id_list:
-		/* EMPTY */
-		|COMMA id id_list 
-		{
-			/* Do Nothing */
-		}
-		;
-id:
-	ID 
-	{
-		create_index_append_attribute(&CONTEXT->ssql->sstr.create_index, $1);
-	}
-	;
-
-drop_index:			/*drop index 语句的语法解析树*/
-    DROP INDEX ID  SEMICOLON 
-		{
-			CONTEXT->ssql->flag=SCF_DROP_INDEX;//"drop_index";
-			drop_index_init(&CONTEXT->ssql->sstr.drop_index, $3);
-		}
+drop_index_stmt:      /*drop index 语句的语法解析树*/
+    DROP INDEX ID ON ID
+    {
+      $$ = new ParsedSqlNode(SCF_DROP_INDEX);
+      $$->drop_index.index_name = $3;
+      $$->drop_index.relation_name = $5;
+      free($3);
+      free($5);
+    }
     ;
-create_table:		/*create table 语句的语法解析树*/
-    CREATE TABLE ID LBRACE attr_def attr_def_list RBRACE SEMICOLON 
-		{
-			CONTEXT->ssql->flag=SCF_CREATE_TABLE;//"create_table";
-			// CONTEXT->ssql->sstr.create_table.attribute_count = CONTEXT->value_length;
-			create_table_init_name(&CONTEXT->ssql->sstr.create_table, $3);
-			//临时变量清零	
-			CONTEXT->value_length = 0;
-		}
+create_table_stmt:    /*create table 语句的语法解析树*/
+    CREATE TABLE ID LBRACE attr_def attr_def_list RBRACE
+    {
+      $$ = new ParsedSqlNode(SCF_CREATE_TABLE);
+      CreateTableSqlNode &create_table = $$->create_table;
+      create_table.relation_name = $3;
+      free($3);
+
+      std::vector<AttrInfoSqlNode> *src_attrs = $6;
+
+      if (src_attrs != nullptr) {
+        create_table.attr_infos.swap(*src_attrs);
+        delete src_attrs;
+      }
+      create_table.attr_infos.emplace_back(*$5);
+      std::reverse(create_table.attr_infos.begin(), create_table.attr_infos.end());
+      delete $5;
+    }
     ;
 attr_def_list:
     /* empty */
-    | COMMA attr_def attr_def_list {    }
+    {
+      $$ = nullptr;
+    }
+    | COMMA attr_def attr_def_list
+    {
+      if ($3 != nullptr) {
+        $$ = $3;
+      } else {
+        $$ = new std::vector<AttrInfoSqlNode>;
+      }
+      $$->emplace_back(*$2);
+      delete $2;
+    }
     ;
     
 attr_def:
-    ID_get type LBRACE number RBRACE 
-		{
-			AttrInfo attribute;
-			attr_info_init(&attribute, CONTEXT->id, $2, $4, FALSE);
-			create_table_append_attribute(&CONTEXT->ssql->sstr.create_table, &attribute);
-			// CONTEXT->ssql->sstr.create_table.attributes[CONTEXT->value_length].name =(char*)malloc(sizeof(char));
-			// strcpy(CONTEXT->ssql->sstr.create_table.attributes[CONTEXT->value_length].name, CONTEXT->id); 
-			// CONTEXT->ssql->sstr.create_table.attributes[CONTEXT->value_length].type = $2;  
-			// CONTEXT->ssql->sstr.create_table.attributes[CONTEXT->value_length].length = $4;
-			CONTEXT->value_length++;
-		}
-    | ID_get TEXT
+    ID type LBRACE number RBRACE 
     {
-			AttrInfo attribute;
-			attr_info_init(&attribute, CONTEXT->id, CHARS, 4096, FALSE);
-			create_table_append_attribute(&CONTEXT->ssql->sstr.create_table, &attribute);
-			CONTEXT->value_length++;
-		}
-    |ID_get type
-		{
-			AttrInfo attribute;
-			attr_info_init(&attribute, CONTEXT->id, $2, 4, FALSE);
-			create_table_append_attribute(&CONTEXT->ssql->sstr.create_table, &attribute);
-			// CONTEXT->ssql->sstr.create_table.attributes[CONTEXT->value_length].name=(char*)malloc(sizeof(char));
-			// strcpy(CONTEXT->ssql->sstr.create_table.attributes[CONTEXT->value_length].name, CONTEXT->id); 
-			// CONTEXT->ssql->sstr.create_table.attributes[CONTEXT->value_length].type=$2;  
-			// CONTEXT->ssql->sstr.create_table.attributes[CONTEXT->value_length].length=4; // default attribute length
-			CONTEXT->value_length++;
-		}
-    |ID_get type LBRACE number RBRACE NOT NULL_VALUE
-		{
-			AttrInfo attribute;
-			attr_info_init(&attribute, CONTEXT->id, $2, $4, FALSE);
-			create_table_append_attribute(&CONTEXT->ssql->sstr.create_table, &attribute);
-			CONTEXT->value_length++;
-		}
-    |ID_get type LBRACE number RBRACE NULLABLE
-		{
-			AttrInfo attribute;
-			attr_info_init(&attribute, CONTEXT->id, $2, $4, TRUE);
-			create_table_append_attribute(&CONTEXT->ssql->sstr.create_table, &attribute);
-			CONTEXT->value_length++;
-		}
-    |ID_get type NOT NULL_VALUE
-		{
-			AttrInfo attribute;
-			attr_info_init(&attribute, CONTEXT->id, $2, 4, FALSE);
-			create_table_append_attribute(&CONTEXT->ssql->sstr.create_table, &attribute);
-			CONTEXT->value_length++;
-		}
-    |ID_get type NULLABLE
-		{
-			AttrInfo attribute;
-			attr_info_init(&attribute, CONTEXT->id, $2, 4, TRUE);
-			create_table_append_attribute(&CONTEXT->ssql->sstr.create_table, &attribute);
-			CONTEXT->value_length++;
-		}
+      $$ = new AttrInfoSqlNode;
+      $$->type = (AttrType)$2;
+      $$->name = $1;
+      $$->length = $4;
+      free($1);
+    }
+    | ID type
+    {
+      $$ = new AttrInfoSqlNode;
+      $$->type = (AttrType)$2;
+      $$->name = $1;
+      $$->length = 4;
+      free($1);
+    }
     ;
 number:
-		NUMBER {$$ = $1;}
-		;
+    NUMBER {$$ = $1;}
+    ;
 type:
-	INT_T { $$=INTS; }
-       | STRING_T { $$=CHARS; }
-       | FLOAT_T { $$=FLOATS; }
-			 | DATE_T { $$=DATES; }
-       ;
-ID_get:
-	ID 
-	{
-		char *temp=$1; 
-		snprintf(CONTEXT->id, sizeof(CONTEXT->id), "%s", temp);
-	}
-	;
-
-	
-insert:				/*insert   语句的语法解析树*/
-    INSERT INTO ID VALUES row_value row_value_list SEMICOLON 
-		{
-			CONTEXT->ssql->flag=SCF_INSERT;		//"insert";
-			inserts_init(&CONTEXT->ssql->sstr.insertion, $3);
-    }
-
-row_value_list:
-		/* EMPTY */
-		| COMMA row_value row_value_list {
-			// Do Nothing
-		}
-row_value:
-		LBRACE value value_list RBRACE
-		{
-			if (0 != inserts_append_data(&CONTEXT->ssql->sstr.insertion, CONTEXT->values, CONTEXT->value_length)) {
-				return -1;
-			}
-			//临时变量清零
-			memset(CONTEXT->values, 0, sizeof(CONTEXT->values));
-      CONTEXT->value_length=0;
-		}
-
-sub_select_list:
-    LBRACE value value_list RBRACE
+    INT_T      { $$=INTS; }
+    | STRING_T { $$=CHARS; }
+    | FLOAT_T  { $$=FLOATS; }
+    | DATE_T   { $$=DATES; }
+    ;
+insert_stmt:        /*insert   语句的语法解析树*/
+    INSERT INTO ID VALUES LBRACE value value_list RBRACE 
     {
-      Expr * expr = malloc(sizeof(Expr));
-      ListExpr * lexp = malloc(sizeof(ListExpr));
-      int v_length = $3 + 1;
-      list_expr_init(lexp, &CONTEXT->values[CONTEXT->value_length - v_length], v_length);
-      expr_init_list(expr, lexp);
-      $$ = expr;
+      $$ = new ParsedSqlNode(SCF_INSERT);
+      $$->insertion.relation_name = $3;
+      if ($7 != nullptr) {
+        $$->insertion.values.swap(*$7);
+        delete $7;
+      }
+      $$->insertion.values.emplace_back(*$6);
+      std::reverse($$->insertion.values.begin(), $$->insertion.values.end());
+      delete $6;
+      free($3);
     }
     ;
 
 value_list:
-    /* empty */{
-        $$ = 0;
+    /* empty */
+    {
+      $$ = nullptr;
     }
     | COMMA value value_list  { 
-  		// CONTEXT->values[CONTEXT->value_length++] = *$2;
-        $$ = $3 + 1;
-	  }
-    ;
-
-mul_expr:
-    unary_expr {
-      $$ = $1;
-    }
-    | SUB unary_expr {
-      Value * tmp_val = malloc(sizeof(Value));
-      value_init_integer(tmp_val, -1);
-      UnaryExpr * tmp_uexpr = malloc(sizeof(UnaryExpr));
-      unary_expr_init_value(tmp_uexpr, tmp_val);
-      Expr * tmp_expr = malloc(sizeof(Expr));
-      expr_init_unary(tmp_expr, tmp_uexpr);
-
-      Expr * expr = malloc(sizeof(Expr));
-      BinaryExpr * b_expr = malloc(sizeof(BinaryExpr));
-      binary_expr_init(b_expr, MUL_OP, tmp_expr, $2);
-      binary_expr_set_minus(b_expr);
-      expr_init_binary(expr, b_expr);
-      $$ = expr;
-    }
-    | mul_expr STAR unary_expr {
-      Expr * expr = malloc(sizeof(Expr));
-      BinaryExpr * b_expr = malloc(sizeof(BinaryExpr));
-      binary_expr_init(b_expr, MUL_OP, $1, $3);
-      expr_init_binary(expr, b_expr);
-      $$ = expr;
-    }
-    | mul_expr DIV unary_expr {
-    	Expr * expr = malloc(sizeof(Expr));
-      BinaryExpr * b_expr = malloc(sizeof(BinaryExpr));
-      binary_expr_init(b_expr, DIV_OP, $1, $3);
-      expr_init_binary(expr, b_expr);
-      $$ = expr;
-    }
-    ;
-
-add_expr:
-    mul_expr { $$ = $1; }
-    | add_expr ADD mul_expr {
-    	Expr * expr = malloc(sizeof(Expr));
-      BinaryExpr * b_expr = malloc(sizeof(BinaryExpr));
-      binary_expr_init(b_expr, ADD_OP, $1, $3);
-      expr_init_binary(expr, b_expr);
-      $$ = expr;
-    }
-    | add_expr SUB mul_expr {
-    	Expr * expr = malloc(sizeof(Expr));
-      BinaryExpr * b_expr = malloc(sizeof(BinaryExpr));
-      binary_expr_init(b_expr, SUB_OP, $1, $3);
-      expr_init_binary(expr, b_expr);
-      $$ = expr;
-    }
-    ;
-
-condition:
-    add_expr comOp add_expr{
-      Condition expr;
-      condition_init(&expr, $2, $1, $3);
-      // condition_print(&expr, 0);
-      CONTEXT->conditions[CONTEXT->condition_length++] = expr;
-    }
-    | add_expr IS NULL_VALUE {
-      Value value;
-      value_init_null(&value);
-
-      UnaryExpr* u_expr = malloc(sizeof(UnaryExpr));
-      unary_expr_init_value(u_expr, &value);
-
-    	Expr *expr = malloc(sizeof(Expr));
-      expr_init_unary(expr, u_expr);
-
-      Condition cond;
-      condition_init(&cond, IS_NULL, $1, expr);
-      CONTEXT->conditions[CONTEXT->condition_length++] = cond;
-    }
-    | add_expr IS NOT NULL_VALUE {
-      Value value;
-      value_init_null(&value);
-
-      UnaryExpr* u_expr = malloc(sizeof(UnaryExpr));
-      unary_expr_init_value(u_expr, &value);
-
-    	Expr *expr = malloc(sizeof(Expr));
-      expr_init_unary(expr, u_expr);
-
-      Condition cond;
-      condition_init(&cond, IS_NOT_NULL, $1, expr);
-      CONTEXT->conditions[CONTEXT->condition_length++] = cond;
-    }
-    | add_expr IN add_expr {
-      // TODO
-      Condition cond;
-      condition_init(&cond, IN_OP, $1, $3);
-      CONTEXT->conditions[CONTEXT->condition_length++] = cond;
-    }
-    | add_expr NOT IN add_expr {
-      // TODO
-      Condition cond;
-      condition_init(&cond, NOT_IN, $1, $4);
-      CONTEXT->conditions[CONTEXT->condition_length++] = cond;
-    }
-    | EXISTS add_expr {
-      // TODO
-      Value * tmp_val = malloc(sizeof(Value));
-      value_init_integer(tmp_val, 1);
-      UnaryExpr * tmp_uexpr = malloc(sizeof(UnaryExpr));
-      unary_expr_init_value(tmp_uexpr, tmp_val);
-      Expr * tmp_expr = malloc(sizeof(Expr));
-      expr_init_unary(tmp_expr, tmp_uexpr);
-
-      Condition cond;
-      condition_init(&cond, EXISTS_OP, tmp_expr, $2);
-      CONTEXT->conditions[CONTEXT->condition_length++] = cond;
-    }
-    | NOT EXISTS add_expr {
-      // TODO
-      Value * tmp_val = malloc(sizeof(Value));
-      value_init_integer(tmp_val, 1);
-      UnaryExpr * tmp_uexpr = malloc(sizeof(UnaryExpr));
-      unary_expr_init_value(tmp_uexpr, tmp_val);
-      Expr * tmp_expr = malloc(sizeof(Expr));
-      expr_init_unary(tmp_expr, tmp_uexpr);
-
-      Condition cond;
-      condition_init(&cond, NOT_EXISTS, tmp_expr, $3);
-      CONTEXT->conditions[CONTEXT->condition_length++] = cond;
-    }
-    ;
-
-having_condition:
-    add_expr comOp add_expr{
-      Condition expr;
-      condition_init(&expr, $2, $1, $3);
-      CONTEXT->havings[CONTEXT->having_length++] = expr;
-    }
-    ;
-
-unary_expr:
-    value {
-    	Expr *expr = malloc(sizeof(Expr));
-      UnaryExpr* u_expr = malloc(sizeof(UnaryExpr));
-      unary_expr_init_value(u_expr, &CONTEXT->values[CONTEXT->value_length-1]);
-      expr_init_unary(expr, u_expr);
-      $$ = expr;
-    }
-    | ID {
-    	Expr *expr = malloc(sizeof(Expr));
-      RelAttr attr;
-      relation_attr_init(&attr, NULL, $1);
-      UnaryExpr* u_expr = malloc(sizeof(UnaryExpr));
-      unary_expr_init_attr(u_expr, &attr);
-      expr_init_unary(expr, u_expr);
-      $$ = expr;
-    }
-    | ID DOT ID {
-    	Expr *expr = malloc(sizeof(Expr));
-      RelAttr attr;
-      relation_attr_init(&attr, $1, $3);
-      UnaryExpr* u_expr = malloc(sizeof(UnaryExpr));
-      unary_expr_init_attr(u_expr, &attr);
-      expr_init_unary(expr, u_expr);
-      $$ = expr;
-    }
-    | LBRACE add_expr RBRACE {
-      expr_set_with_brace($2);
-      $$ = $2;
-    }
-    | func_expr {
-      $$ = $1;
-    }
-    | aggr_func_expr {
-      $$ = $1;
-    }
-    | sub_select {
-       $$ = $1;
-    }
-    | sub_select_list{
-      $$ = $1;
-    }
-    ;
-aggr_func_type:
-    AGGR_MAX {
-      CONTEXT->aggrfunctype = MAX;
-    }
-    | AGGR_MIN {
-      CONTEXT->aggrfunctype = MIN;
-    }
-    | AGGR_SUM {
-      CONTEXT->aggrfunctype = SUM;
-    }
-    | AGGR_AVG {
-      CONTEXT->aggrfunctype = AVG;
-    }
-    | AGGR_COUNT {
-      CONTEXT->aggrfunctype = COUNT;
-    }
-    ;
-
-aggr_func_expr:
-    aggr_func_type LBRACE add_expr RBRACE
-    {
-      AggrFuncExpr* afexpr = malloc(sizeof(AggrFuncExpr));
-      aggr_func_expr_init(afexpr, CONTEXT->aggrfunctype, $3);
-      Expr* expr = malloc(sizeof(Expr));
-      expr_init_aggr_func(expr, afexpr);
-      $$ = expr;
-    }
-    | aggr_func_type LBRACE STAR RBRACE
-    {
-      if (CONTEXT->aggrfunctype != COUNT) {
-        return -1;
+      if ($3 != nullptr) {
+        $$ = $3;
+      } else {
+        $$ = new std::vector<Value>;
       }
-      // regard as a string value
-  		value_init_string(&CONTEXT->values[CONTEXT->value_length++], "*");
-
-    	Expr *param = malloc(sizeof(Expr));
-      UnaryExpr* u_expr = malloc(sizeof(UnaryExpr));
-      unary_expr_init_value(u_expr, &CONTEXT->values[CONTEXT->value_length-1]);
-      expr_init_unary(param, u_expr);
-
-      AggrFuncExpr* afexpr = malloc(sizeof(AggrFuncExpr));
-      aggr_func_expr_init(afexpr, COUNT, param);
-      Expr* expr = malloc(sizeof(Expr));
-      expr_init_aggr_func(expr, afexpr);
-      $$ = expr;
+      $$->emplace_back(*$2);
+      delete $2;
     }
     ;
-
-func_expr:
-    LENGTH LBRACE add_expr RBRACE
-    {
-      FuncExpr* fexpr = malloc(sizeof(FuncExpr));
-      func_expr_init_type(fexpr, 0);
-      func_expr_init_params(fexpr, $3, NULL);
-      Expr* expr = malloc(sizeof(Expr));
-      expr_init_func(expr, fexpr);
-      $$ = expr;
-    }
-    |
-    ROUND LBRACE add_expr RBRACE
-    {
-      FuncExpr* fexpr = malloc(sizeof(FuncExpr));
-      func_expr_init_type(fexpr, 1);
-      func_expr_init_params(fexpr, $3, NULL);
-      Expr* expr = malloc(sizeof(Expr));
-      expr_init_func(expr, fexpr);
-      $$ = expr;
-    }
-    |
-    ROUND LBRACE add_expr COMMA add_expr RBRACE
-    {
-      FuncExpr* fexpr = malloc(sizeof(FuncExpr));
-      func_expr_init_type(fexpr, 1);
-      func_expr_init_params(fexpr, $3, $5);
-      Expr* expr = malloc(sizeof(Expr));
-      expr_init_func(expr, fexpr);
-      $$ = expr;
-    }
-    |
-    DATE_FORMAT LBRACE add_expr COMMA add_expr RBRACE
-    {
-      FuncExpr* fexpr = malloc(sizeof(FuncExpr));
-      func_expr_init_type(fexpr, 2);
-      func_expr_init_params(fexpr, $3, $5);
-      Expr* expr = malloc(sizeof(Expr));
-      expr_init_func(expr, fexpr);
-      $$ = expr;
-    }
-    ;
-
-sub_select:
-    LBRACE SELECT select_attr FROM from select_where opt_group_by opt_having opt_order_by RBRACE {
-      // printf("THE SUBQUERY has %d projects %d froms %d inner_join_conditions %d conditions %d groupbys %d havings %d orderbys\n", $3, $5->from_len, $5->inner_join_conditions_len, $6, $7, $8, $9);
-
-      Selects * sub_select = (Selects *)malloc(sizeof(Selects));
-      memset(sub_select, 0 ,sizeof(Selects));
-
-			selects_append_projects(sub_select,  &CONTEXT->projects[CONTEXT->project_length - $3], $3);
-    
-      size_t from_len = $5->from_len;
-      size_t inner_join_conditions_len = $5->inner_join_conditions_len;
-			selects_append_froms(sub_select,  &CONTEXT->froms[CONTEXT->from_length - from_len], from_len);
-
-      // fill inner join conditions
-			selects_append_conditions(sub_select, &CONTEXT->conditions[CONTEXT->condition_length - inner_join_conditions_len], inner_join_conditions_len);
-
-      // fill where conditions
-      selects_set_where_condition(sub_select, $6);
-
-			selects_append_groupbys(sub_select, &CONTEXT->groupbys[CONTEXT->groupby_length - $7], $7);
-
-			selects_append_havings(sub_select, &CONTEXT->havings[CONTEXT->having_length - $8], $8);
-
-			selects_append_orderbys(sub_select, &CONTEXT->orderbys[CONTEXT->orderby_length - $9], $9);
-
-			//CONTEXT->ssql->flag=SCF_SELECT;//"select";
-
-			CONTEXT->orderby_length -= $9;
-      CONTEXT->having_length -= $8;
-			CONTEXT->groupby_length -= $7;
-			CONTEXT->condition_length -= inner_join_conditions_len;
-      CONTEXT->from_length -= from_len;
-      CONTEXT->project_length -= $3;
-			CONTEXT->value_length = 0;
-
-      SubQueryExpr * s_expr = malloc(sizeof(SubQueryExpr));
-      sub_query_expr_init(s_expr, sub_select);
-      Expr* expr = malloc(sizeof(Expr));
-      expr_init_sub_query(expr, s_expr);
-      $$ = expr;
-    }
-    ;
-
 value:
-    NUMBER{	
-  		value_init_integer(&CONTEXT->values[CONTEXT->value_length++], $1);
-		}
-    |SUB NUMBER{	
-  		value_init_integer(&CONTEXT->values[CONTEXT->value_length++], -($2));
-		}
-    |FLOAT{
-  		value_init_float(&CONTEXT->values[CONTEXT->value_length++], $1);
-		}
-    |SUB FLOAT{
-  		value_init_float(&CONTEXT->values[CONTEXT->value_length++], -($2));
-		}
+    NUMBER {
+      $$ = new Value((int)$1);
+      @$ = @1;
+    }
+    |FLOAT {
+      $$ = new Value((float)$1);
+      @$ = @1;
+    }
     |SSS {
-			$1 = substr($1,1,strlen($1)-2);
-  		value_init_string(&CONTEXT->values[CONTEXT->value_length++], $1);
-		}
-		|DATE_STR {
-			int p1 = find($1,1,"-");
-			int p2 = find($1,p1+1,"-");
-			char *y = substr($1,1,p1-1);							// year
-			char *m = substr($1,p1+1,p2-1);						// month
-			char *d = substr($1,p2+1,strlen($1)-2);		// day
-			if (0 != value_init_date(&CONTEXT->values[CONTEXT->value_length++], y, m, d)){
-				return -1;
-			}
-		}
-    |NULL_VALUE {
-      value_init_null(&CONTEXT->values[CONTEXT->value_length++]);
+      char *tmp = common::substr($1,1,strlen($1)-2);
+      $$ = new Value(tmp);
+      free(tmp);
+      free($1);
+    }
+    |DATE_STR {
+      char* tmp = common::substr($1, 1, strlen($1) - 2);
+      $$ = new Value(tmp, strlen(tmp), 1);
+      free(tmp);
     }
     ;
     
-delete:		/*  delete 语句的语法解析树*/
-    DELETE FROM ID where SEMICOLON 
-		{
-			CONTEXT->ssql->flag = SCF_DELETE;//"delete";
-			deletes_init_relation(&CONTEXT->ssql->sstr.deletion, $3);
-			deletes_set_conditions(&CONTEXT->ssql->sstr.deletion, 
-					CONTEXT->conditions, CONTEXT->condition_length);
-			CONTEXT->condition_length = 0;	
+delete_stmt:    /*  delete 语句的语法解析树*/
+    DELETE FROM ID where 
+    {
+      $$ = new ParsedSqlNode(SCF_DELETE);
+      $$->deletion.relation_name = $3;
+      if ($4 != nullptr) {
+        $$->deletion.conditions.swap(*$4);
+        delete $4;
+      }
+      free($3);
+    }
+    ;
+update_stmt:      /*  update 语句的语法解析树*/
+    UPDATE ID SET ID EQ value where 
+    {
+      $$ = new ParsedSqlNode(SCF_UPDATE);
+      $$->update.relation_name = $2;
+      $$->update.attribute_name = $4;
+      $$->update.value = *$6;
+      if ($7 != nullptr) {
+        $$->update.conditions.swap(*$7);
+        delete $7;
+      }
+      free($2);
+      free($4);
+    }
+    ;
+select_stmt:        /*  select 语句的语法解析树*/
+    SELECT select_attr FROM ID rel_list where
+    {
+      $$ = new ParsedSqlNode(SCF_SELECT);
+      if ($2 != nullptr) {
+        $$->selection.attributes.swap(*$2);
+        delete $2;
+      }
+      if ($5 != nullptr) {
+        $$->selection.relations.swap(*$5);
+        delete $5;
+      }
+      $$->selection.relations.push_back($4);
+      std::reverse($$->selection.relations.begin(), $$->selection.relations.end());
+
+      if ($6 != nullptr) {
+        $$->selection.conditions.swap(*$6);
+        delete $6;
+      }
+      free($4);
     }
     ;
 
-update:			/*  update 语句的语法解析树*/
-    UPDATE ID SET update_option update_options where SEMICOLON
-		{
-			CONTEXT->ssql->flag = SCF_UPDATE;		//"update";
-			updates_init(&CONTEXT->ssql->sstr.update, $2, 
-					CONTEXT->conditions, CONTEXT->condition_length);
-			CONTEXT->condition_length = 0;
-		}
-update_options:
-		/* EMPTY */
-		|COMMA update_option update_options {
-			// Do Nothing
-		}
-update_option:
-		ID EQ value {
-    	Expr *expr = malloc(sizeof(Expr));
-      UnaryExpr* u_expr = malloc(sizeof(UnaryExpr));
-      unary_expr_init_value(u_expr, &CONTEXT->values[0]);
-      expr_init_unary(expr, u_expr);
-
-			// Value *value = &CONTEXT->values[0];
-			updates_append_attribute(&CONTEXT->ssql->sstr.update, $1, expr);
-			//临时变量清零
-			memset(CONTEXT->values, 0, sizeof(CONTEXT->values));
-      CONTEXT->value_length=0;
-		}
-    | ID EQ sub_select {
-			updates_append_attribute(&CONTEXT->ssql->sstr.update, $1, $3);
-			//临时变量清零
-			memset(CONTEXT->values, 0, sizeof(CONTEXT->values));
-      CONTEXT->value_length=0;
+calc_stmt:
+    CALC expression_list
+    {
+      $$ = new ParsedSqlNode(SCF_CALC);
+      std::reverse($2->begin(), $2->end());
+      $$->calc.expressions.swap(*$2);
+      delete $2;
     }
     ;
 
-select:				/*  select 语句的语法解析树*/
-    SELECT select_attr SEMICOLON {
-			selects_append_projects(&CONTEXT->ssql->sstr.selection, CONTEXT->projects, CONTEXT->project_length);
-			CONTEXT->ssql->flag=SCF_SELECT;//"select";
-      CONTEXT->project_length=0;
+expression_list:
+    expression
+    {
+      $$ = new std::vector<Expression*>;
+      $$->emplace_back($1);
     }
-    | SELECT select_attr FROM from select_where opt_group_by opt_having opt_order_by SEMICOLON
-		{
-      // printf("THE QUERY has %d projects %d froms %d inner_join_conditions %d conditions %d groupbys %d havings %d orderbys\n\n", $2, $4->from_len, $4->inner_join_conditions_len, $5, $6, $7, $8);
-
-			selects_append_projects(&CONTEXT->ssql->sstr.selection, CONTEXT->projects, CONTEXT->project_length);
-
-			selects_append_froms(&CONTEXT->ssql->sstr.selection, CONTEXT->froms, CONTEXT->from_length);
-
-			selects_append_conditions(&CONTEXT->ssql->sstr.selection, CONTEXT->conditions, CONTEXT->condition_length);
-
-      selects_set_where_condition(&CONTEXT->ssql->sstr.selection, $5);
-
-			selects_append_orderbys(&CONTEXT->ssql->sstr.selection, CONTEXT->orderbys, CONTEXT->orderby_length);
-
-			selects_append_groupbys(&CONTEXT->ssql->sstr.selection, CONTEXT->groupbys, CONTEXT->groupby_length);
-
-			selects_append_havings(&CONTEXT->ssql->sstr.selection, CONTEXT->havings, CONTEXT->having_length);
-
-			CONTEXT->ssql->flag=SCF_SELECT;//"select";
-
-			//临时变量清零
-      CONTEXT->having_length=0;
-			CONTEXT->groupby_length=0;
-			CONTEXT->orderby_length=0;
-			CONTEXT->condition_length=0;
-			CONTEXT->from_length=0;
-      CONTEXT->project_length=0;
-			CONTEXT->value_length=0; // ???
-	}
-	;
+    | expression COMMA expression_list
+    {
+      if ($3 != nullptr) {
+        $$ = $3;
+      } else {
+        $$ = new std::vector<Expression *>;
+      }
+      $$->emplace_back($1);
+    }
+    ;
+expression:
+    expression '+' expression {
+      $$ = create_arithmetic_expression(ArithmeticExpr::Type::ADD, $1, $3, sql_string, &@$);
+    }
+    | expression '-' expression {
+      $$ = create_arithmetic_expression(ArithmeticExpr::Type::SUB, $1, $3, sql_string, &@$);
+    }
+    | expression '*' expression {
+      $$ = create_arithmetic_expression(ArithmeticExpr::Type::MUL, $1, $3, sql_string, &@$);
+    }
+    | expression '/' expression {
+      $$ = create_arithmetic_expression(ArithmeticExpr::Type::DIV, $1, $3, sql_string, &@$);
+    }
+    | LBRACE expression RBRACE {
+      $$ = $2;
+      $$->set_name(token_name(sql_string, &@$));
+    }
+    | '-' expression %prec UMINUS {
+      $$ = create_arithmetic_expression(ArithmeticExpr::Type::NEGATIVE, $2, nullptr, sql_string, &@$);
+    }
+    | value {
+      $$ = new ValueExpr(*$1);
+      $$->set_name(token_name(sql_string, &@$));
+      delete $1;
+    }
+    ;
 
 select_attr:
-    STAR attr_list {  
-			ProjectCol project_col;
-			projectcol_init_star(&project_col, NULL);
-			CONTEXT->projects[CONTEXT->project_length++]=project_col;
-      $$ = $2 + 1;
-		}
-    |
-    ID DOT STAR attr_list{
-      ProjectCol project_col;
-			projectcol_init_star(&project_col, $1);
-			CONTEXT->projects[CONTEXT->project_length++]=project_col;
-      $$ = $4 + 1;
+    '*' {
+      $$ = new std::vector<RelAttrSqlNode>;
+      RelAttrSqlNode attr;
+      attr.relation_name  = "";
+      attr.attribute_name = "*";
+      $$->emplace_back(attr);
     }
-    |
-    add_expr attr_list{
-      ProjectCol project_col;
-      projectcol_init_expr(&project_col, $1);
-			CONTEXT->projects[CONTEXT->project_length++]=project_col;
-      $$ = $2 + 1;
-    }
-    |
-    add_expr AS ID attr_list{
-      ProjectCol project_col;
-      projectcol_init_expr(&project_col, $1);
-      expr_init_alias($1, $3);
-			CONTEXT->projects[CONTEXT->project_length++]=project_col;
-      $$ = $4 + 1;
-    }
-    |
-    add_expr ID attr_list{
-      ProjectCol project_col;
-      projectcol_init_expr(&project_col, $1);
-      expr_init_alias($1, $2);
-			CONTEXT->projects[CONTEXT->project_length++]=project_col;
-      $$ = $3 + 1;
+    | rel_attr attr_list {
+      if ($2 != nullptr) {
+        $$ = $2;
+      } else {
+        $$ = new std::vector<RelAttrSqlNode>;
+      }
+      $$->emplace_back(*$1);
+      delete $1;
     }
     ;
-attr_list:
-    /* empty */ {
-      $$ = 0;
-    }
-    |
-    COMMA STAR attr_list {  
-			ProjectCol project_col;
-			projectcol_init_star(&project_col, NULL);
-			CONTEXT->projects[CONTEXT->project_length++]=project_col;
-      $$ = $3 + 1;
-		}
-    |
-    COMMA ID DOT STAR attr_list{
-      ProjectCol project_col;
-			projectcol_init_star(&project_col, $2);
-			CONTEXT->projects[CONTEXT->project_length++]=project_col;
-      $$ = $5 + 1;
-    }
-    |
-    COMMA add_expr attr_list{
-      ProjectCol project_col;
-      projectcol_init_expr(&project_col, $2);
-			CONTEXT->projects[CONTEXT->project_length++]=project_col;
-      $$ = $3 + 1;
-    }
-    |
-    COMMA add_expr AS ID attr_list{
-      ProjectCol project_col;
-      projectcol_init_expr(&project_col, $2);
-      expr_init_alias($2, $4);
-			CONTEXT->projects[CONTEXT->project_length++]=project_col;
-      $$ = $5 + 1;
-    }
-    |
-    COMMA add_expr ID attr_list{
-      ProjectCol project_col;
-      projectcol_init_expr(&project_col, $2);
-      expr_init_alias($2, $3);
-			CONTEXT->projects[CONTEXT->project_length++]=project_col;
-      $$ = $4 + 1;
-    }
-  	;
 
-from:
-    ID rel_list {
-      Relation rel;
-      relation_from_init(&rel, $1, NULL);
-			CONTEXT->froms[CONTEXT->from_length++]=rel;
-      $$ = $2;
-      $$->from_len++;
+aggr_op:
+    SUM_F { $$ = AGGR_SUM; }
+    | AVG_F { $$ = AGGR_AVG; }
+    | MAX_F { $$ = AGGR_MAX; }
+    | MIN_F { $$ = AGGR_MIN; }
+    | COUNT_F { $$ = AGGR_COUNT; }
+    ;
+
+
+rel_attr:
+    ID {
+      $$ = new RelAttrSqlNode;
+      $$->attribute_name = $1;
+      free($1);
     }
-    |ID ID rel_list {
-      Relation rel;
-      relation_from_init(&rel, $1, $2);
-			CONTEXT->froms[CONTEXT->from_length++]=rel;
+    | ID DOT ID {
+      $$ = new RelAttrSqlNode;
+      $$->relation_name  = $1;
+      $$->attribute_name = $3;
+      free($1);
+      free($3);
+    }
+    | aggr_op LBRACE rel_attr_aggr rel_attr_aggr_list RBRACE {
       $$ = $3;
-      $$->from_len++;
+      $$->aggregation = $1;
+      // redundant columns
+      if ($4 != nullptr){
+        $$->valid = false;
+        delete $4;
+      }
     }
-    |ID AS ID rel_list {
-      Relation rel;
-      relation_from_init(&rel, $1, $3);
-			CONTEXT->froms[CONTEXT->from_length++]=rel;
-      $$ = $4;
-      $$->from_len++;
+    | aggr_op LBRACE RBRACE{
+      $$ = new RelAttrSqlNode;
+      $$->relation_name = "";
+      $$->attribute_name = "";
+      $$->aggregation = $1;
+      // empty columns
+      $$->valid = false;
+    }
+    ;
+
+rel_attr_aggr:
+  '*' {
+      $$ = new RelAttrSqlNode;
+      $$->relation_name = "";
+      $$->attribute_name = "*";
+    }
+    | ID {
+      $$ = new RelAttrSqlNode;
+      $$->attribute_name = $1;
+      free($1);
+    } | ID DOT ID {
+      $$ = new RelAttrSqlNode;
+      $$->relation_name  = $1;
+      $$->attribute_name = $3;
+      free($1);
+      free($3);
+    }
+
+rel_attr_aggr_list:
+  /* empty */
+    {
+      $$ = nullptr;
+    }
+    | COMMA rel_attr_aggr rel_attr_aggr_list {
+      if ($3 != nullptr) {
+        $$ = $3;
+      } else {
+        $$ = new std::vector<RelAttrSqlNode>;
+      }
+
+      $$->emplace_back(*$2);
+      delete $2;
+    }
+    ;
+
+attr_list:
+    /* empty */
+    {
+      $$ = nullptr;
+    }
+    | COMMA rel_attr attr_list {
+      if ($3 != nullptr) {
+        $$ = $3;
+      } else {
+        $$ = new std::vector<RelAttrSqlNode>;
+      }
+
+      $$->emplace_back(*$2);
+      delete $2;
     }
     ;
 
 rel_list:
-    /* empty */ {
-      // new FromInfo
-      $$ = (FromInfo*)malloc(sizeof(FromInfo));
-      $$->from_len = 0;
-      $$->inner_join_conditions_len = 0;
+    /* empty */
+    {
+      $$ = nullptr;
     }
-    | COMMA ID rel_list {	
-        Relation rel;
-        relation_from_init(&rel, $2, NULL);
-        CONTEXT->froms[CONTEXT->from_length++]=rel;
+    | COMMA ID rel_list {
+      if ($3 != nullptr) {
         $$ = $3;
-        $$->from_len++;
-		  }
-    | COMMA ID ID rel_list{
-      Relation rel;
-      relation_from_init(&rel, $2, $3);
-			CONTEXT->froms[CONTEXT->from_length++]=rel;
-      $$ = $4;
-      $$->from_len++;
-    }
-    | COMMA ID AS ID rel_list{
-      Relation rel;
-      relation_from_init(&rel, $2, $4);
-			CONTEXT->froms[CONTEXT->from_length++]=rel;
-      $$ = $5;
-      $$->from_len++;
-    }
-    | INNER JOIN ID inner_join_conditions rel_list{
-      Relation rel;
-      relation_from_init(&rel, $3, NULL);
-        CONTEXT->froms[CONTEXT->from_length++]=rel;
-        $$ = $5;
-        $$->from_len++;
-        $$->inner_join_conditions_len += $4;
+      } else {
+        $$ = new std::vector<std::string>;
+      }
+
+      $$->push_back($2);
+      free($2);
     }
     ;
-inner_join_conditions:
-	/* empty */ {
-    $$ = 0;
-  }
-	| ON condition condition_list{
-    $$ = $3 + 1;
-	}
-	;
 where:
-    /* empty */ {
-      $$ = 0;
+    /* empty */
+    {
+      $$ = nullptr;
     }
-    | WHERE condition condition_list {	
-				// CONTEXT->conditions[CONTEXT->condition_length++]=*$2;
-        $$ = $3 + 1;
-			}
+    | WHERE condition_list {
+      $$ = $2;  
+    }
     ;
-select_where:
-     /* empty */ {
-      $$ = NULL;
-     }
-     | WHERE condition_or {
-      $$ = $2;
-     }
-     ;
-
-condition_or:
-     condition_and {
-      $$ = $1;
-     }
-     | condition_or OR condition_and {
-      Condition * c_expr = malloc(sizeof(Condition));
-      condition_init(c_expr, OR_OP, $1, $3);
-      Expr * expr = malloc(sizeof(Expr));
-      expr_init_condition(expr, c_expr);
-
-      $$ = expr;
-     }
-     ;
-
-condition_and:
-     condition {
-      Expr * expr = malloc(sizeof(Expr));
-      Condition * c_expr = malloc(sizeof(Condition));
-      *c_expr = CONTEXT->conditions[--CONTEXT->condition_length]; // make condition in where clause would not appear in CONTEXT->condtitions
-      expr_init_condition(expr, c_expr);
-      $$ = expr;
-     }
-     | condition_and AND condition {
-      Condition * rc_expr = malloc(sizeof(Condition));
-      *rc_expr = CONTEXT->conditions[--CONTEXT->condition_length]; // make condition in where clause would not appear in CONTEXT->condtitions
-      Expr * right_expr = malloc(sizeof(Expr));
-      expr_init_condition(right_expr, rc_expr);
-
-      Condition * c_expr = malloc(sizeof(Condition));
-      condition_init(c_expr, AND_OP, $1, right_expr);
-      Expr * expr = malloc(sizeof(Expr));
-      expr_init_condition(expr, c_expr);
-
-      $$ = expr;
-     }
-     ;
-
 condition_list:
-    /* empty */ {
-      $$ = 0;
+    /* empty */
+    {
+      $$ = nullptr;
     }
-    | AND condition condition_list {
-				// CONTEXT->conditions[CONTEXT->condition_length++]=*$2;
-        $$ = $3 + 1;
-			}
+    | condition {
+      $$ = new std::vector<ConditionSqlNode>;
+      $$->emplace_back(*$1);
+      delete $1;
+    }
+    | condition AND condition_list {
+      $$ = $3;
+      $$->emplace_back(*$1);
+      delete $1;
+    }
     ;
-opt_having:
-    /* empty */  { 
-      $$ = 0;
+condition:
+    rel_attr comp_op value
+    {
+      $$ = new ConditionSqlNode;
+      $$->left_is_attr = 1;
+      $$->left_attr = *$1;
+      $$->right_is_attr = 0;
+      $$->right_value = *$3;
+      $$->comp = $2;
+
+      delete $1;
+      delete $3;
     }
-    | HAVING having_condition having_condition_list {	
-        $$ = $3 + 1;
+    | value comp_op value 
+    {
+      $$ = new ConditionSqlNode;
+      $$->left_is_attr = 0;
+      $$->left_value = *$1;
+      $$->right_is_attr = 0;
+      $$->right_value = *$3;
+      $$->comp = $2;
+
+      delete $1;
+      delete $3;
     }
-    ;
-having_condition_list:
-    /* empty */ {
-      $$ = 0;
+    | rel_attr comp_op rel_attr
+    {
+      $$ = new ConditionSqlNode;
+      $$->left_is_attr = 1;
+      $$->left_attr = *$1;
+      $$->right_is_attr = 1;
+      $$->right_attr = *$3;
+      $$->comp = $2;
+
+      delete $1;
+      delete $3;
     }
-    | AND having_condition having_condition_list {
-        $$ = $3 + 1;
+    | value comp_op rel_attr
+    {
+      $$ = new ConditionSqlNode;
+      $$->left_is_attr = 0;
+      $$->left_value = *$1;
+      $$->right_is_attr = 1;
+      $$->right_attr = *$3;
+      $$->comp = $2;
+
+      delete $1;
+      delete $3;
     }
     ;
 
-
-comOp:
-  	  EQ { $$ = EQUAL_TO; }
+comp_op:
+      EQ { $$ = EQUAL_TO; }
     | LT { $$ = LESS_THAN; }
     | GT { $$ = GREAT_THAN; }
     | LE { $$ = LESS_EQUAL; }
     | GE { $$ = GREAT_EQUAL; }
     | NE { $$ = NOT_EQUAL; }
-    | LIKE { $$ = LIKE_OP; }
-    | NOT LIKE { $$ = NOT_LIKE_OP; }
     ;
-sort_unit:
-	ID
-	{
-		RelAttr attr;
-		relation_attr_init(&attr, NULL, $1);
-		OrderBy orderby;
-		orderby_init(&orderby, TRUE, &attr);
-		CONTEXT->orderbys[CONTEXT->orderby_length++] = orderby;
-	}
-	|
-	ID DOT ID
-	{
-		RelAttr attr;
-		relation_attr_init(&attr, $1, $3);
-		OrderBy orderby;
-		orderby_init(&orderby, TRUE, &attr);
-		CONTEXT->orderbys[CONTEXT->orderby_length++] = orderby;
-	}
-	|
-	ID DESC
-	{
-		RelAttr attr;
-		relation_attr_init(&attr, NULL, $1);
-		OrderBy orderby;
-		orderby_init(&orderby, FALSE, &attr);
-		CONTEXT->orderbys[CONTEXT->orderby_length++] = orderby;
-	}
-	|
-	ID ASC
-	{
-		RelAttr attr;
-		relation_attr_init(&attr, NULL, $1);
-		OrderBy orderby;
-		orderby_init(&orderby, TRUE, &attr);
-		CONTEXT->orderbys[CONTEXT->orderby_length++] = orderby;
-	}
-	|
-	ID DOT ID DESC
-	{
-		RelAttr attr;
-		relation_attr_init(&attr, $1, $3);
-		OrderBy orderby;
-		orderby_init(&orderby, FALSE, &attr);
-		CONTEXT->orderbys[CONTEXT->orderby_length++] = orderby;
-	}
-	|
-	ID DOT ID ASC
-	{
-		RelAttr attr;
-		relation_attr_init(&attr, $1, $3);
-		OrderBy orderby;
-		orderby_init(&orderby, TRUE, &attr);
-		CONTEXT->orderbys[CONTEXT->orderby_length++] = orderby;
-	}
-	;
-sort_list:
-	sort_unit COMMA sort_list
-		{
-    $$ = $3 + 1;
-	}
-	| sort_unit
-		{
-    $$ = 1;
-	}
-	;
-opt_order_by:
-	/* empty */ {
-   $$ = 0;
-  }
-	| ORDER BY sort_list
-		{
-      $$ = $3;
-	}
-	;
 
-groupby_unit:
-	ID
-	{
-		RelAttr attr;
-		relation_attr_init(&attr, NULL, $1);
-		CONTEXT->groupbys[CONTEXT->groupby_length++] = attr;
-	}
-	|
-	ID DOT ID
-	{
-		RelAttr attr;
-		relation_attr_init(&attr, $1, $3);
-		CONTEXT->groupbys[CONTEXT->groupby_length++] = attr;
-	}
-  ;
+load_data_stmt:
+    LOAD DATA INFILE SSS INTO TABLE ID 
+    {
+      char *tmp_file_name = common::substr($4, 1, strlen($4) - 2);
+      
+      $$ = new ParsedSqlNode(SCF_LOAD_DATA);
+      $$->load_data.relation_name = $7;
+      $$->load_data.file_name = tmp_file_name;
+      free($7);
+      free(tmp_file_name);
+    }
+    ;
 
-groupby_list:
-	groupby_unit COMMA groupby_list
-		{
-    $$ = $3 + 1;
-	}
-	| groupby_unit
-		{
-    $$ = 1;
-	}
-	;
-opt_group_by:
-	/* empty */ {
-    $$ = 0;
-  }
-	| GROUP BY groupby_list
-		{
-    $$ = $3 + 1;
-	}
-	;
+explain_stmt:
+    EXPLAIN command_wrapper
+    {
+      $$ = new ParsedSqlNode(SCF_EXPLAIN);
+      $$->explain.sql_node = std::unique_ptr<ParsedSqlNode>($2);
+    }
+    ;
 
-load_data:
-		LOAD DATA INFILE SSS INTO TABLE ID SEMICOLON
-		{
-		  CONTEXT->ssql->flag = SCF_LOAD_DATA;
-			load_data_init(&CONTEXT->ssql->sstr.load_data, $7, $4);
-		}
-		;
+set_variable_stmt:
+    SET ID EQ value
+    {
+      $$ = new ParsedSqlNode(SCF_SET_VARIABLE);
+      $$->set_variable.name  = $2;
+      $$->set_variable.value = *$4;
+      free($2);
+      delete $4;
+    }
+    ;
+
+opt_semicolon: /*empty*/
+    | SEMICOLON
+    ;
 %%
 //_____________________________________________________________________
 extern void scan_string(const char *str, yyscan_t scanner);
 
-int sql_parse(const char *s, Query *sqls){
-	ParserContext context;
-	memset(&context, 0, sizeof(context));
-
-	yyscan_t scanner;
-	yylex_init_extra(&context, &scanner);
-	context.ssql = sqls;
-	scan_string(s, scanner);
-	int result = yyparse(scanner);
-	yylex_destroy(scanner);
-	return result;
+int sql_parse(const char *s, ParsedSqlResult *sql_result) {
+  yyscan_t scanner;
+  yylex_init(&scanner);
+  scan_string(s, scanner);
+  int result = yyparse(s, sql_result, scanner);
+  yylex_destroy(scanner);
+  return result;
 }
